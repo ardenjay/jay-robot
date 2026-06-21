@@ -262,6 +262,35 @@
     #upload-status.error   { background: #fee2e2; color: #991b1b; }
     #upload-status.info    { background: #eff6ff; color: #1d4ed8; }
 
+    .vlm-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      color: #555;
+      margin-top: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .vlm-toggle input { cursor: pointer; }
+
+    #upload-log {
+      font-size: 0.72rem;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      background: #1a1a2e;
+      color: #7dd87d;
+      border-radius: 5px;
+      padding: 8px;
+      max-height: 110px;
+      overflow-y: auto;
+      margin-top: 6px;
+      display: none;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #upload-log.visible { display: block; }
+
     /* ── Chat area ── */
     .chat-area {
       flex: 1;
@@ -394,8 +423,8 @@
         <div class="sidebar-section">
           <h2>上傳文件</h2>
           <div class="drop-zone" id="drop-zone">
-            <input type="file" id="file-input" accept=".md,.markdown">
-            <div id="drop-label">拖曳 .md 檔案到這裡<br>或點擊選取</div>
+            <input type="file" id="file-input" accept=".md,.markdown,.pdf">
+            <div id="drop-label">拖曳 .md / .pdf 檔案到這裡<br>或點擊選取</div>
           </div>
           <select class="phase-select" id="phase-select">
             <option value="">選擇 NPDS 階段...</option>
@@ -407,8 +436,13 @@
             <option value="C6">C6 量產</option>
             <option value="C7">C7 停產</option>
           </select>
+          <label class="vlm-toggle" id="vlm-toggle" style="display:none">
+            <input type="checkbox" id="vlm-checkbox" checked>
+            啟用 VLM（較慢但準確）
+          </label>
           <button class="upload-btn" id="upload-btn" disabled>上傳</button>
           <div id="upload-status"></div>
+          <div id="upload-log"></div>
         </div>
       </aside>
 
@@ -553,10 +587,13 @@
       // Reset upload
       selectedFile = null;
       document.getElementById('upload-btn').disabled = true;
-      document.getElementById('drop-label').innerHTML = '拖曳 .md 檔案到這裡<br>或點擊選取';
+      document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf 檔案到這裡<br>或點擊選取';
       document.getElementById('phase-select').value = '';
       document.getElementById('upload-status').textContent = '';
       document.getElementById('upload-status').className = '';
+      document.getElementById('vlm-toggle').style.display = 'none';
+      document.getElementById('upload-log').classList.remove('visible');
+      document.getElementById('upload-log').textContent = '';
 
       loadDocTree();
     }
@@ -642,6 +679,10 @@
     function selectFile(file) {
       selectedFile = file;
       document.getElementById('drop-label').textContent = file.name;
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      document.getElementById('vlm-toggle').style.display = isPdf ? '' : 'none';
+      document.getElementById('upload-log').classList.remove('visible');
+      document.getElementById('upload-log').textContent = '';
       checkUploadReady();
       setStatus('', '');
     }
@@ -658,32 +699,75 @@
       const phase = document.getElementById('phase-select').value;
       if (!phase) return;
 
+      const isPdf = selectedFile.name.toLowerCase().endsWith('.pdf');
+      const useVlm = isPdf && document.getElementById('vlm-checkbox').checked;
+      const logEl = document.getElementById('upload-log');
+
       uploadBtn.disabled = true;
       setStatus('上傳中...', 'info');
+      if (isPdf) { logEl.textContent = ''; logEl.classList.add('visible'); }
 
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('project_id', currentProjectId);
       formData.append('phase', phase);
+      formData.append('use_vlm', useVlm ? 'true' : 'false');
 
       try {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        const data = await res.json();
+
+        // Validation errors return JSON 400 before SSE starts
         if (!res.ok) {
+          const data = await res.json();
           setStatus(data.error || '上傳失敗', 'error');
           uploadBtn.disabled = false;
-        } else {
-          setStatus(`✓ ${data.message}（${data.chunks} 個段落）`, 'success');
-          selectedFile = null;
-          fileInput.value = '';
-          document.getElementById('drop-label').innerHTML = '拖曳 .md 檔案到這裡<br>或點擊選取';
-          document.getElementById('phase-select').value = '';
-          uploadBtn.disabled = true;
-          loadDocTree(); // refresh tree
+          logEl.classList.remove('visible');
+          return;
+        }
+
+        // Parse SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+
+          for (const part of parts) {
+            if (!part.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(part.slice(6));
+              if (event.type === 'log') {
+                const line = document.createElement('div');
+                line.textContent = event.message;
+                logEl.appendChild(line);
+                logEl.scrollTop = logEl.scrollHeight;
+                setStatus('轉換中...', 'info');
+              } else if (event.type === 'done') {
+                setStatus(`✓ ${event.message}（${event.chunks} 個段落）`, 'success');
+                logEl.classList.remove('visible');
+                selectedFile = null;
+                fileInput.value = '';
+                document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf 檔案到這裡<br>或點擊選取';
+                document.getElementById('phase-select').value = '';
+                document.getElementById('vlm-toggle').style.display = 'none';
+                uploadBtn.disabled = true;
+                loadDocTree();
+              } else if (event.type === 'error') {
+                setStatus(`錯誤：${event.message}`, 'error');
+                uploadBtn.disabled = false;
+              }
+            } catch {}
+          }
         }
       } catch (err) {
         setStatus(`網路錯誤：${err.message}`, 'error');
         uploadBtn.disabled = false;
+        logEl.classList.remove('visible');
       }
     });
 

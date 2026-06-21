@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { spawn } = require('child_process');
 const { ingestFile } = require('../services/ingestion');
 
 const router = express.Router();
@@ -15,42 +17,99 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
+function findFirstMd(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const found = findFirstMd(full);
+      if (found) return found;
+    } else if (entry.name.endsWith('.md')) {
+      return full;
+    }
+  }
+  return null;
+}
+
+function convertPdfToMarkdown(pdfPath, useVlm, onLog) {
+  return new Promise((resolve, reject) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mineru-'));
+    console.log(`[MinerU] 開始轉換：${pdfPath} (VLM: ${useVlm})`);
+
+    const args = ['run', '--no-capture-output', '-n', 'mineru', 'mineru', '-p', pdfPath, '-o', tmpDir];
+    if (!useVlm) args.push('-b', 'pipeline');
+
+    const proc = spawn('conda', args);
+
+    proc.stdout.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) { process.stdout.write(`[MinerU] ${d}`); onLog(msg); }
+    });
+    proc.stderr.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) { process.stderr.write(`[MinerU] ${d}`); onLog(msg); }
+    });
+
+    proc.on('error', reject);
+    proc.on('close', code => {
+      if (code !== 0) return reject(new Error(`MinerU 結束，exit code ${code}`));
+      const mdPath = findFirstMd(tmpDir);
+      if (!mdPath) return reject(new Error('MinerU 未產生任何 Markdown 輸出'));
+      resolve({ mdPath, tmpDir });
+    });
+  });
+}
+
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '請選擇要上傳的檔案' });
   }
 
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (ext !== '.md' && ext !== '.markdown') {
+  if (ext !== '.md' && ext !== '.markdown' && ext !== '.pdf') {
     fs.unlinkSync(req.file.path);
-    return res.status(400).json({ error: '僅接受 .md 或 .markdown 格式的檔案' });
+    return res.status(400).json({ error: '僅接受 .md、.markdown 或 .pdf 格式的檔案' });
   }
 
-  // Task 5.1: read project_id and phase from form fields
   const projectId = req.body.project_id;
   const phase = req.body.phase;
+  const useVlm = req.body.use_vlm === 'true';
 
-  // Task 5.2
   if (!projectId || !projectId.trim()) {
     fs.unlinkSync(req.file.path);
     return res.status(400).json({ error: 'project_id 為必填' });
   }
 
-  // Task 5.3
   if (!phase || !VALID_PHASES.has(phase)) {
     fs.unlinkSync(req.file.path);
     return res.status(400).json({ error: 'phase 必須為 C1 至 C7' });
   }
 
+  // Switch to SSE for streaming progress to the UI
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const send = data => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  let mdPath = req.file.path;
+  let tmpDir = null;
+
   try {
-    // Task 5.4: pass projectId and phase to ingestFile
-    const chunkCount = await ingestFile(req.file.path, req.file.originalname, projectId.trim(), phase);
-    fs.unlinkSync(req.file.path);
-    res.json({ message: `成功處理 ${req.file.originalname}`, chunks: chunkCount });
+    if (ext === '.pdf') {
+      const result = await convertPdfToMarkdown(req.file.path, useVlm, msg => send({ type: 'log', message: msg }));
+      mdPath = result.mdPath;
+      tmpDir = result.tmpDir;
+    }
+
+    const chunkCount = await ingestFile(mdPath, req.file.originalname, projectId.trim(), phase);
+    send({ type: 'done', message: `成功處理 ${req.file.originalname}`, chunks: chunkCount });
   } catch (err) {
-    console.error('Ingestion error:', err);
+    console.error('Upload error:', err);
+    send({ type: 'error', message: err.message });
+  } finally {
     if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    res.status(500).json({ error: `處理失敗：${err.message}` });
+    if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+    res.end();
   }
 });
 
