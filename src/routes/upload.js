@@ -10,6 +10,11 @@ const router = express.Router();
 
 const VALID_PHASES = new Set(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']);
 
+// 由 markitdown 轉換為 Markdown 的文件格式（PDF 仍走 MinerU，不在此清單）
+const MARKITDOWN_EXTS = new Set([
+  '.docx', '.pptx', '.xlsx', '.xls', '.html', '.htm', '.csv', '.json', '.xml', '.epub',
+]);
+
 const storage = multer.diskStorage({
   destination: path.join(process.cwd(), 'uploads'),
   filename: (req, file, cb) => cb(null, file.originalname),
@@ -59,15 +64,45 @@ function convertPdfToMarkdown(pdfPath, useVlm, onLog) {
   });
 }
 
+function convertWithMarkitdown(filePath, onLog) {
+  return new Promise((resolve, reject) => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'markitdown-'));
+    const mdPath = path.join(tmpDir, 'out.md');
+    console.log(`[markitdown] 開始轉換：${filePath}`);
+
+    const args = ['run', '--no-capture-output', '-n', 'markitdown', 'markitdown', filePath, '-o', mdPath];
+    const proc = spawn('conda', args);
+
+    proc.stdout.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) { process.stdout.write(`[markitdown] ${d}`); onLog(msg); }
+    });
+    proc.stderr.on('data', d => {
+      const msg = d.toString().trim();
+      if (msg) { process.stderr.write(`[markitdown] ${d}`); onLog(msg); }
+    });
+
+    proc.on('error', reject);
+    proc.on('close', code => {
+      if (code !== 0) return reject(new Error(`markitdown 結束，exit code ${code}`));
+      if (!fs.existsSync(mdPath)) return reject(new Error('markitdown 未產生任何 Markdown 輸出'));
+      resolve({ mdPath, tmpDir });
+    });
+  });
+}
+
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '請選擇要上傳的檔案' });
   }
 
   const ext = path.extname(req.file.originalname).toLowerCase();
-  if (ext !== '.md' && ext !== '.markdown' && ext !== '.pdf') {
+  const isMarkdown = ext === '.md' || ext === '.markdown';
+  const isPdf = ext === '.pdf';
+  const isMarkitdown = MARKITDOWN_EXTS.has(ext);
+  if (!isMarkdown && !isPdf && !isMarkitdown) {
     fs.unlinkSync(req.file.path);
-    return res.status(400).json({ error: '僅接受 .md、.markdown 或 .pdf 格式的檔案' });
+    return res.status(400).json({ error: '僅接受 Markdown、PDF 或 markitdown 支援的文件格式' });
   }
 
   const projectId = req.body.project_id;
@@ -95,8 +130,12 @@ router.post('/', upload.single('file'), async (req, res) => {
   let tmpDir = null;
 
   try {
-    if (ext === '.pdf') {
+    if (isPdf) {
       const result = await convertPdfToMarkdown(req.file.path, useVlm, msg => send({ type: 'log', message: msg }));
+      mdPath = result.mdPath;
+      tmpDir = result.tmpDir;
+    } else if (isMarkitdown) {
+      const result = await convertWithMarkitdown(req.file.path, msg => send({ type: 'log', message: msg }));
       mdPath = result.mdPath;
       tmpDir = result.tmpDir;
     }

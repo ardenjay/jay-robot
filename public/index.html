@@ -466,8 +466,8 @@
         <div class="sidebar-section">
           <h2>上傳文件</h2>
           <div class="drop-zone" id="drop-zone">
-            <input type="file" id="file-input" accept=".md,.markdown,.pdf">
-            <div id="drop-label">拖曳 .md / .pdf 檔案到這裡<br>或點擊選取</div>
+            <input type="file" id="file-input" accept=".md,.markdown,.pdf,.docx,.pptx,.xlsx,.xls,.html,.htm,.csv,.json,.xml,.epub">
+            <div id="drop-label">拖曳 .md / .pdf / Word / Excel / PPT 等檔案到這裡<br>或點擊選取</div>
           </div>
           <select class="phase-select" id="phase-select">
             <option value="">選擇 NPDS 階段...</option>
@@ -630,7 +630,7 @@
       // Reset upload
       selectedFile = null;
       document.getElementById('upload-btn').disabled = true;
-      document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf 檔案到這裡<br>或點擊選取';
+      document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf / Word / Excel / PPT 等檔案到這裡<br>或點擊選取';
       document.getElementById('phase-select').value = '';
       document.getElementById('upload-status').textContent = '';
       document.getElementById('upload-status').className = '';
@@ -857,7 +857,7 @@
                 logEl.classList.remove('visible');
                 selectedFile = null;
                 fileInput.value = '';
-                document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf 檔案到這裡<br>或點擊選取';
+                document.getElementById('drop-label').innerHTML = '拖曳 .md / .pdf / Word / Excel / PPT 等檔案到這裡<br>或點擊選取';
                 document.getElementById('phase-select').value = '';
                 document.getElementById('vlm-toggle').style.display = 'none';
                 uploadBtn.disabled = true;
