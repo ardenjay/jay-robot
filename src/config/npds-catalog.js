@@ -147,13 +147,26 @@ const NPDS_CATALOG = {
   },
 };
 
-function formatCatalogForPrompt() {
+// 從檔名 / docId 擷取 NPDS 編號（C + 階段碼1–7 + 至少兩位數字，如 C560、C3081）。
+// 取不到回傳 null；以大寫回傳以利去重比對。
+function extractNpdsCode(name) {
+  const m = String(name).match(/C[1-7]\d{2,}/i);
+  return m ? m[0].toUpperCase() : null;
+}
+
+// excludeCodes：已上傳的 NPDS 編號集合（Set，大寫）。輸出目錄時略過這些編號的項目；
+// 若某階段所有文件都被排除，連階段標題一併略過。未傳則輸出完整目錄（向後相容）。
+function formatCatalogForPrompt(excludeCodes) {
+  const exclude = excludeCodes || new Set();
   return Object.entries(NPDS_CATALOG)
     .map(([phase, { name, docs }]) => {
-      const docLines = docs.map(d => `  - ${d.code} ${d.name}：${d.desc}`).join('\n');
+      const visible = docs.filter(d => !exclude.has(d.code.toUpperCase()));
+      if (visible.length === 0) return null;
+      const docLines = visible.map(d => `  - ${d.code} ${d.name}：${d.desc}`).join('\n');
       return `${name}\n${docLines}`;
     })
+    .filter(Boolean)
     .join('\n\n');
 }
 
-module.exports = { NPDS_CATALOG, formatCatalogForPrompt };
+module.exports = { NPDS_CATALOG, formatCatalogForPrompt, extractNpdsCode };

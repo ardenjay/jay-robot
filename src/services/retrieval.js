@@ -1,10 +1,10 @@
 const llm = require('../adapters/llm');
 const vectorStore = require('../adapters/vector');
-const { formatCatalogForPrompt } = require('../config/npds-catalog');
+const { formatCatalogForPrompt, extractNpdsCode } = require('../config/npds-catalog');
 
 const TOP_K = 5;
 
-function buildPrompt(question, chunks) {
+function buildPrompt(question, chunks, uploadedCodes) {
   const context = chunks
     .map((c, i) => `[${i + 1}] ${c.title ? `**${c.title}**\n` : ''}${c.text}`)
     .join('\n\n---\n\n');
@@ -20,7 +20,7 @@ ${context}
 
 以下是完整的 NPDS 文件目錄，僅供推理使用，不作為回答問題的資料來源。當無法從已上傳文件找到答案時，請根據問題語義從此目錄中識別 1–3 份最相關的文件，建議使用者上傳。
 
-${formatCatalogForPrompt()}
+${formatCatalogForPrompt(uploadedCodes)}
 
 ## 問題
 
@@ -43,7 +43,13 @@ async function* answer(question, projectId) {
     return;
   }
 
-  const prompt = buildPrompt(question, chunks);
+  // 已上傳文件的 NPDS 編號集合，從目錄中排除，避免建議重複上傳
+  const uploadedDocs = vectorStore.listDocuments ? await vectorStore.listDocuments(projectId) : [];
+  const uploadedCodes = new Set(
+    uploadedDocs.map(d => extractNpdsCode(d.docId)).filter(Boolean)
+  );
+
+  const prompt = buildPrompt(question, chunks, uploadedCodes);
 
   let fullResponse = '';
   for await (const token of llm.stream(prompt)) {
