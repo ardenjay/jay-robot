@@ -6,7 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "node --watch src/app.js"
+    "dev": "node --watch src/app.js",
+    "test": "node --test tests/chunker.test.js tests/vector-adapter.test.js tests/ingestion.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

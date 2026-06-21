@@ -37,7 +37,7 @@ function parseAndChunk(markdownText, filename) {
 function splitLongChunk(text, title) {
   if (text.length <= MAX_CHUNK_LENGTH) return [text];
 
-  const paragraphs = text.split(/\n\n+/);
+  const paragraphs = text.split(/\n+/).filter(p => p.trim());
   const result = [];
   let current = '';
 
@@ -53,23 +53,24 @@ function splitLongChunk(text, title) {
   return result;
 }
 
-async function ingestFile(filePath, filename) {
+async function ingestFile(filePath, filename, llmAdapter, vectorAdapter) {
+  const adapter = llmAdapter || llm;
+  const store = vectorAdapter || vectorStore;
+
   const markdownText = fs.readFileSync(filePath, 'utf-8');
   const docId = filename;
 
   const rawChunks = parseAndChunk(markdownText, filename);
   if (rawChunks.length === 0) return 0;
 
-  // Embed each chunk with backoff already built into the adapter
   const embeddedChunks = [];
   for (const chunk of rawChunks) {
-    const embedding = await llm.embed(chunk.text);
+    const embedding = await adapter.embed(chunk.text);
     embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding });
   }
 
-  // Replace existing chunks for this document
-  await vectorStore.clear(docId);
-  await vectorStore.add(embeddedChunks);
+  await store.clear(docId);
+  await store.add(embeddedChunks);
 
   return embeddedChunks.length;
 }
