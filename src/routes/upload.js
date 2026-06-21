@@ -102,12 +102,16 @@ router.post('/', upload.single('file'), async (req, res) => {
     }
 
     const chunkCount = await ingestFile(mdPath, req.file.originalname, projectId.trim(), phase);
+
+    const docsDir = path.join(process.cwd(), 'public', 'documents', projectId.trim());
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.copyFileSync(req.file.path, path.join(docsDir, req.file.originalname));
+
     send({ type: 'done', message: `成功處理 ${req.file.originalname}`, chunks: chunkCount });
   } catch (err) {
     console.error('Upload error:', err);
     send({ type: 'error', message: err.message });
   } finally {
-    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
     res.end();
   }

@@ -41,4 +41,13 @@ router.get('/:id/documents', async (req, res) => {
   }
 });
 
+router.delete('/:id/documents/:docId', async (req, res) => {
+  try {
+    await vectorStore.clear(req.params.docId, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

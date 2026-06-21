@@ -195,10 +195,30 @@
       color: #555;
       padding: 3px 8px;
       border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .phase-file span {
+      flex: 1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    .phase-file .del-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 0 2px;
+      border-radius: 3px;
+      line-height: 1;
+      visibility: hidden;
+    }
+    .phase-file:hover .del-btn { visibility: visible; }
+    .phase-file .del-btn:hover { color: #dc2626; background: #fee2e2; }
     .phase-empty-hint {
       font-size: 0.8rem;
       color: #ccc;
@@ -635,7 +655,27 @@
               const el = document.createElement('div');
               el.className = 'phase-file';
               el.title = f;
-              el.textContent = f;
+
+              const name = document.createElement('span');
+              name.textContent = f;
+
+              const delBtn = document.createElement('button');
+              delBtn.className = 'del-btn';
+              delBtn.textContent = '×';
+              delBtn.title = '刪除';
+              delBtn.addEventListener('click', async e => {
+                e.stopPropagation();
+                if (!confirm(`確定刪除「${f}」？此操作無法還原。`)) return;
+                try {
+                  await fetch(`/api/projects/${currentProjectId}/documents/${encodeURIComponent(f)}`, { method: 'DELETE' });
+                  loadDocTree();
+                } catch (err) {
+                  alert(`刪除失敗：${err.message}`);
+                }
+              });
+
+              el.appendChild(name);
+              el.appendChild(delBtn);
               fileList.appendChild(el);
             });
           } else {
@@ -884,7 +924,7 @@
         el.innerHTML = '<strong>來源：</strong>無相關文件';
         return;
       }
-      el.innerHTML = `<strong>來源：</strong><ul>${sources.map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`;
+      el.innerHTML = `<strong>來源：</strong><ul>${sources.map(s => `<li><a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(s.docId)}</a></li>`).join('')}</ul>`;
     }
 
     function escHtml(str) {

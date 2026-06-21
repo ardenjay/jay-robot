@@ -45,11 +45,19 @@ async function* answer(question, projectId) {
 
   const prompt = buildPrompt(question, chunks);
 
+  let fullResponse = '';
   for await (const token of llm.stream(prompt)) {
+    fullResponse += token;
     yield { type: 'token', value: token };
   }
 
-  const sources = [...new Set(chunks.map(c => c.title).filter(Boolean))];
+  const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
+  const sources = fullResponse.includes(NO_ANSWER_PHRASE)
+    ? []
+    : [...new Map(chunks.map(c => [c.docId, {
+        docId: c.docId,
+        url: `/documents/${projectId}/${encodeURIComponent(c.docId)}`,
+      }])).values()];
   yield { type: 'sources', value: sources };
 }
 
