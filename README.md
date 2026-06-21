@@ -1,73 +1,73 @@
 # Jay Robot
 
-個人 Markdown 知識庫 RAG 聊天機器人。上傳 `.md` 文件後，用自然語言提問，系統根據文件內容回答並標註來源。
+A personal Markdown knowledge base RAG chatbot. Upload `.md` files and ask questions in natural language — answers are generated from your documents with source citations.
 
-## 功能
+## Features
 
-- 上傳 Markdown 文件（支援拖曳）
-- 依標題自動切塊、向量化儲存
-- 問題向量化 → 相似度搜尋 → Gemini 生成答案
-- 串流輸出，即時顯示回答
-- 每個回答附來源段落標題
-- LLM 與 Vector Store 均可透過環境變數替換
+- Upload Markdown files via click or drag-and-drop
+- Auto-chunks documents by heading structure
+- Vector similarity search + Gemini-powered answers
+- Streaming response output
+- Source citations shown under each answer
+- Swappable LLM and Vector Store via environment variables
 
-## 環境需求
+## Requirements
 
 - Node.js v18+
-- Gemini API Key（[取得免費額度](https://aistudio.google.com/app/apikey)）
+- Gemini API Key ([get one free](https://aistudio.google.com/app/apikey))
 
-## 安裝
+## Setup
 
 ```bash
-git clone https://github.com/你的帳號/jay-robot.git
+git clone https://github.com/your-username/jay-robot.git
 cd jay-robot
 npm install
 cp .env.example .env
 ```
 
-編輯 `.env`，填入你的 API key：
+Edit `.env` and fill in your API key:
 
 ```
 GEMINI_API_KEY=your_api_key_here
 ```
 
-## 啟動
+## Start
 
 ```bash
 npm start
 ```
 
-開啟瀏覽器：`http://localhost:3000`
+Open your browser at `http://localhost:3000`
 
-## 使用方式
+## Usage
 
-1. 左側上傳區選取或拖曳 `.md` 檔案 → 點擊「上傳」
-2. 右側輸入問題，按 Enter 送出
-3. 回答即時串流顯示，下方附來源段落
+1. Upload a `.md` file using the left panel
+2. Type a question in the input box and press Enter
+3. The answer streams in real time with source sections listed below
 
-## 專案結構
+## Project Structure
 
 ```
 src/
 ├── adapters/
-│   ├── llm/        # LLM 介面（預設：Gemini）
-│   └── vector/     # Vector Store 介面（預設：SQLite）
+│   ├── llm/          # LLM interface (default: Gemini)
+│   └── vector/       # Vector store interface (default: SQLite)
 ├── services/
-│   ├── ingestion.js  # 文件解析、切塊、向量化
-│   └── retrieval.js  # 搜尋、生成、串流
+│   ├── ingestion.js  # Parse, chunk, embed, store
+│   └── retrieval.js  # Search, generate, stream
 ├── routes/
-│   ├── upload.js   # POST /api/upload
-│   └── chat.js     # POST /api/chat (SSE)
+│   ├── upload.js     # POST /api/upload
+│   └── chat.js       # POST /api/chat (SSE)
 └── app.js
 public/
-└── index.html      # 前端 UI
+└── index.html        # Frontend UI
 ```
 
-## 環境變數
+## Environment Variables
 
-| 變數 | 預設值 | 說明 |
-|------|--------|------|
-| `GEMINI_API_KEY` | — | Gemini API 金鑰（必填） |
-| `VECTOR_ADAPTER` | `sqlite` | Vector Store 實作 |
-| `LLM_ADAPTER` | `gemini` | LLM 實作 |
-| `PORT` | `3000` | 伺服器 port |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_API_KEY` | — | Gemini API key (required) |
+| `VECTOR_ADAPTER` | `sqlite` | Vector store implementation |
+| `LLM_ADAPTER` | `gemini` | LLM implementation |
+| `PORT` | `3000` | Server port |
