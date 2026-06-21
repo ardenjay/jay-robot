@@ -50,4 +50,19 @@ router.delete('/:id/documents/:docId', async (req, res) => {
   }
 });
 
+const VALID_PHASES = new Set(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']);
+
+router.patch('/:id/documents/:docId/phase', async (req, res) => {
+  const { phase } = req.body;
+  if (!phase || !VALID_PHASES.has(phase)) {
+    return res.status(400).json({ error: 'phase 必須為 C1 至 C7' });
+  }
+  try {
+    await vectorStore.movePhase(req.params.docId, req.params.id, phase);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

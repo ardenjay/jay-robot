@@ -219,6 +219,29 @@
     }
     .phase-file:hover .del-btn { visibility: visible; }
     .phase-file .del-btn:hover { color: #dc2626; background: #fee2e2; }
+    .phase-file .move-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0 2px;
+      border-radius: 3px;
+      line-height: 1;
+      visibility: hidden;
+    }
+    .phase-file:hover .move-btn { visibility: visible; }
+    .phase-file .move-btn:hover { color: #4f46e5; background: #eef2ff; }
+    .phase-file .move-select {
+      font-size: 0.75rem;
+      border: 1px solid #4f46e5;
+      border-radius: 3px;
+      padding: 1px 3px;
+      color: #4f46e5;
+      background: #fff;
+      cursor: pointer;
+    }
     .phase-empty-hint {
       font-size: 0.8rem;
       color: #ccc;
@@ -659,6 +682,40 @@
               const name = document.createElement('span');
               name.textContent = f;
 
+              const moveBtn = document.createElement('button');
+              moveBtn.className = 'move-btn';
+              moveBtn.textContent = '⇄';
+              moveBtn.title = '移動階段';
+              moveBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                const sel = document.createElement('select');
+                sel.className = 'move-select';
+                ['C1','C2','C3','C4','C5','C6','C7'].forEach(p => {
+                  const opt = document.createElement('option');
+                  opt.value = p;
+                  opt.textContent = p;
+                  if (p === phase) opt.selected = true;
+                  sel.appendChild(opt);
+                });
+                sel.addEventListener('change', async () => {
+                  const newPhase = sel.value;
+                  try {
+                    await fetch(`/api/projects/${currentProjectId}/documents/${encodeURIComponent(f)}/phase`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ phase: newPhase }),
+                    });
+                    loadDocTree();
+                  } catch (err) {
+                    alert(`移動失敗：${err.message}`);
+                  }
+                });
+                sel.addEventListener('keydown', e => { if (e.key === 'Escape') loadDocTree(); });
+                sel.addEventListener('blur', () => loadDocTree());
+                moveBtn.replaceWith(sel);
+                sel.focus();
+              });
+
               const delBtn = document.createElement('button');
               delBtn.className = 'del-btn';
               delBtn.textContent = '×';
@@ -675,6 +732,7 @@
               });
 
               el.appendChild(name);
+              el.appendChild(moveBtn);
               el.appendChild(delBtn);
               fileList.appendChild(el);
             });
@@ -716,6 +774,11 @@
     });
     fileInput.addEventListener('change', () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
 
+    function detectPhase(filename) {
+      const m = filename.match(/C([1-7])\d{2}/i);
+      return m ? `C${m[1]}` : null;
+    }
+
     function selectFile(file) {
       selectedFile = file;
       document.getElementById('drop-label').textContent = file.name;
@@ -723,6 +786,8 @@
       document.getElementById('vlm-toggle').style.display = isPdf ? '' : 'none';
       document.getElementById('upload-log').classList.remove('visible');
       document.getElementById('upload-log').textContent = '';
+      const autoPhase = detectPhase(file.name);
+      if (autoPhase) document.getElementById('phase-select').value = autoPhase;
       checkUploadReady();
       setStatus('', '');
     }

@@ -126,6 +126,12 @@ class SqliteVectorAdapter extends VectorAdapter {
     this._persist();
   }
 
+  async movePhase(docId, projectId, newPhase) {
+    await this._ready;
+    this.db.run('UPDATE chunks SET phase = ? WHERE doc_id = ? AND project_id = ?', [newPhase, docId, projectId]);
+    this._persist();
+  }
+
   // Task 2.4
   async listDocuments(projectId) {
     await this._ready;
