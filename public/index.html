@@ -23,36 +23,199 @@
       font-size: 1.2rem;
       font-weight: 600;
       letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
 
-    .main {
-      display: flex;
+    header .back-btn {
+      background: rgba(255,255,255,0.15);
+      border: none;
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: none;
+    }
+    header .back-btn:hover { background: rgba(255,255,255,0.25); }
+
+    #app { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* ── Project list view ── */
+    #view-projects {
       flex: 1;
+      overflow-y: auto;
+      padding: 32px;
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .view-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 24px;
+      color: #1a1a2e;
+    }
+
+    .create-project-form {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 32px;
+    }
+
+    .create-project-form input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .create-project-form input:focus { border-color: #4f46e5; }
+
+    .btn-primary {
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover { background: #3730a3; }
+    .btn-primary:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+    .project-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .project-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 20px 24px;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .project-card:hover {
+      border-color: #4f46e5;
+      box-shadow: 0 2px 8px rgba(79,70,229,0.1);
+    }
+    .project-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
+    .project-card .meta { font-size: 0.8rem; color: #888; }
+
+    .empty-projects {
+      text-align: center;
+      color: #aaa;
+      padding: 48px 0;
+      font-size: 0.95rem;
+    }
+    .empty-projects p { margin-top: 8px; }
+
+    /* ── Project detail view ── */
+    #view-detail {
+      flex: 1;
+      display: flex;
       overflow: hidden;
     }
 
-    /* ── Sidebar ── */
-    .sidebar {
-      width: 300px;
+    /* Left sidebar: doc tree + upload */
+    .detail-sidebar {
+      width: 280px;
       background: #fff;
       border-right: 1px solid #e0e0e0;
       display: flex;
       flex-direction: column;
-      padding: 20px;
-      gap: 12px;
+      overflow: hidden;
     }
 
-    .sidebar h2 { font-size: 0.85rem; text-transform: uppercase; color: #666; letter-spacing: 0.8px; }
+    .sidebar-section {
+      padding: 16px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .sidebar-section h2 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      color: #888;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
 
+    /* Doc tree */
+    .doc-tree { flex: 1; overflow-y: auto; padding: 16px; }
+    .doc-tree h2 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      color: #888;
+      letter-spacing: 0.8px;
+      margin-bottom: 12px;
+    }
+
+    .phase-node { margin-bottom: 4px; }
+
+    .phase-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 600;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .phase-header:hover { background: #f5f5f5; }
+    .phase-header.has-files { color: #1a1a2e; }
+    .phase-header.no-files { color: #bbb; }
+
+    .phase-toggle { font-size: 0.7rem; transition: transform 0.2s; display: inline-block; }
+    .phase-toggle.open { transform: rotate(90deg); }
+
+    .phase-label { flex: 1; }
+    .phase-count {
+      font-size: 0.75rem;
+      background: #eef2ff;
+      color: #4f46e5;
+      border-radius: 10px;
+      padding: 1px 7px;
+      font-weight: 500;
+    }
+    .phase-count.empty { background: #f5f5f5; color: #ccc; }
+
+    .phase-files { display: none; padding-left: 20px; }
+    .phase-files.open { display: block; }
+
+    .phase-file {
+      font-size: 0.82rem;
+      color: #555;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .phase-empty-hint {
+      font-size: 0.8rem;
+      color: #ccc;
+      padding: 3px 8px;
+      font-style: italic;
+    }
+
+    /* Upload area in sidebar */
     .drop-zone {
       border: 2px dashed #ccc;
       border-radius: 8px;
-      padding: 24px 16px;
+      padding: 16px;
       text-align: center;
       cursor: pointer;
       transition: border-color 0.2s, background 0.2s;
       color: #888;
-      font-size: 0.9rem;
+      font-size: 0.82rem;
     }
     .drop-zone:hover, .drop-zone.drag-over {
       border-color: #4f46e5;
@@ -61,14 +224,27 @@
     }
     .drop-zone input { display: none; }
 
+    .phase-select {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.88rem;
+      margin-top: 8px;
+      outline: none;
+    }
+    .phase-select:focus { border-color: #4f46e5; }
+
     .upload-btn {
+      width: 100%;
+      margin-top: 8px;
       background: #4f46e5;
       color: #fff;
       border: none;
       border-radius: 6px;
-      padding: 10px;
+      padding: 9px;
       cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       font-weight: 500;
       transition: background 0.2s;
     }
@@ -76,10 +252,11 @@
     .upload-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
 
     #upload-status {
-      font-size: 0.82rem;
-      padding: 8px 10px;
-      border-radius: 6px;
-      min-height: 36px;
+      font-size: 0.8rem;
+      padding: 6px 8px;
+      border-radius: 5px;
+      margin-top: 6px;
+      min-height: 28px;
     }
     #upload-status.success { background: #dcfce7; color: #166534; }
     #upload-status.error   { background: #fee2e2; color: #991b1b; }
@@ -179,77 +356,315 @@
       font-size: 0.95rem;
     }
     .empty-hint p { margin-top: 8px; }
+
+    .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  <header>🤖 Jay Robot</header>
-  <div class="main">
-    <!-- Sidebar: Upload -->
-    <aside class="sidebar">
-      <h2>上傳文件</h2>
-      <div class="drop-zone" id="drop-zone">
-        <input type="file" id="file-input" accept=".md,.markdown">
-        <div>拖曳 .md 檔案到這裡<br>或點擊選取</div>
-      </div>
-      <button class="upload-btn" id="upload-btn" disabled>上傳</button>
-      <div id="upload-status"></div>
-    </aside>
+  <header>
+    <button class="back-btn" id="back-btn">← 專案列表</button>
+    <span id="header-title">🤖 Jay Robot</span>
+  </header>
+  <div id="app">
 
-    <!-- Chat -->
-    <div class="chat-area">
-      <div id="messages">
-        <div class="empty-hint">
-          <div>📄 先上傳 Markdown 文件</div>
-          <p>再輸入問題，Jay Robot 會根據文件內容回答</p>
+    <!-- View: Project List -->
+    <div id="view-projects">
+      <div class="view-title">專案列表</div>
+      <div class="create-project-form">
+        <input type="text" id="new-project-name" placeholder="輸入新專案名稱...">
+        <button class="btn-primary" id="create-project-btn">建立專案</button>
+      </div>
+      <div class="project-list" id="project-list">
+        <div class="empty-projects" id="projects-empty">
+          <div>📁 尚無專案</div>
+          <p>建立第一個專案，開始上傳 NPDS 文件</p>
         </div>
       </div>
-      <div class="input-row">
-        <textarea id="question-input" placeholder="輸入問題，按 Enter 送出..." rows="1"></textarea>
-        <button id="send-btn" disabled>送出</button>
+    </div>
+
+    <!-- View: Project Detail -->
+    <div id="view-detail" class="hidden">
+      <!-- Left sidebar -->
+      <aside class="detail-sidebar">
+        <div class="doc-tree" id="doc-tree">
+          <h2>文件樹</h2>
+          <!-- phases rendered by JS -->
+        </div>
+
+        <div class="sidebar-section">
+          <h2>上傳文件</h2>
+          <div class="drop-zone" id="drop-zone">
+            <input type="file" id="file-input" accept=".md,.markdown">
+            <div id="drop-label">拖曳 .md 檔案到這裡<br>或點擊選取</div>
+          </div>
+          <select class="phase-select" id="phase-select">
+            <option value="">選擇 NPDS 階段...</option>
+            <option value="C1">C1 計畫</option>
+            <option value="C2">C2 原型</option>
+            <option value="C3">C3 EVT</option>
+            <option value="C4">C4 DVT</option>
+            <option value="C5">C5 PVT</option>
+            <option value="C6">C6 量產</option>
+            <option value="C7">C7 停產</option>
+          </select>
+          <button class="upload-btn" id="upload-btn" disabled>上傳</button>
+          <div id="upload-status"></div>
+        </div>
+      </aside>
+
+      <!-- Chat -->
+      <div class="chat-area">
+        <div id="messages">
+          <div class="empty-hint" id="chat-empty-hint">
+            <div>💬 開始提問</div>
+            <p>上傳文件後，輸入問題，Jay Robot 會根據 NPDS 文件回答</p>
+          </div>
+        </div>
+        <div class="input-row">
+          <textarea id="question-input" placeholder="輸入問題，按 Enter 送出..." rows="1"></textarea>
+          <button id="send-btn">送出</button>
+        </div>
       </div>
     </div>
+
   </div>
 
   <script>
-    // ── Upload ──
-    const dropZone = document.getElementById('drop-zone');
+    // ── State ──
+    let currentProjectId = null;
+    let selectedFile = null;
+
+    // ── DOM refs ──
+    const viewProjects = document.getElementById('view-projects');
+    const viewDetail   = document.getElementById('view-detail');
+    const backBtn      = document.getElementById('back-btn');
+    const headerTitle  = document.getElementById('header-title');
+
+    // Task 8.1: Hash router
+    function route() {
+      const hash = location.hash || '#/';
+      const match = hash.match(/^#\/projects\/([^/]+)$/);
+      if (match) {
+        showDetail(match[1]);
+      } else {
+        showProjects();
+      }
+    }
+
+    window.addEventListener('hashchange', route);
+    window.addEventListener('DOMContentLoaded', route);
+
+    // ── View: Project list ──
+    function showProjects() {
+      currentProjectId = null;
+      viewProjects.classList.remove('hidden');
+      viewDetail.classList.add('hidden');
+      backBtn.style.display = 'none';
+      headerTitle.textContent = '🤖 Jay Robot';
+      loadProjects();
+    }
+
+    // Task 8.2
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const projects = await res.json();
+        renderProjectList(projects);
+      } catch (err) {
+        console.error('Failed to load projects', err);
+      }
+    }
+
+    function renderProjectList(projects) {
+      const list = document.getElementById('project-list');
+      const empty = document.getElementById('projects-empty');
+      const cards = list.querySelectorAll('.project-card');
+      cards.forEach(c => c.remove());
+
+      if (!projects.length) {
+        empty.style.display = '';
+        return;
+      }
+      empty.style.display = 'none';
+
+      for (const p of projects) {
+        const card = document.createElement('div');
+        card.className = 'project-card';
+        card.innerHTML = `<h3>${escHtml(p.name)}</h3><div class="meta">建立於 ${formatDate(p.created_at)}</div>`;
+        card.addEventListener('click', () => { location.hash = `#/projects/${p.id}`; });
+        list.appendChild(card);
+      }
+    }
+
+    // Task 8.3: Create project form
+    document.getElementById('create-project-btn').addEventListener('click', async () => {
+      const input = document.getElementById('new-project-name');
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+
+      const btn = document.getElementById('create-project-btn');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const project = await res.json();
+        if (!res.ok) { alert(project.error); return; }
+        input.value = '';
+        location.hash = `#/projects/${project.id}`;
+      } catch (err) {
+        alert('建立失敗：' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('new-project-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('create-project-btn').click();
+    });
+
+    backBtn.addEventListener('click', () => { location.hash = '#/'; });
+
+    // ── View: Project detail ──
+    // Task 8.4
+    async function showDetail(projectId) {
+      currentProjectId = projectId;
+      viewProjects.classList.add('hidden');
+      viewDetail.classList.remove('hidden');
+      backBtn.style.display = '';
+
+      // Load project name for header
+      try {
+        const res = await fetch('/api/projects');
+        const projects = await res.json();
+        const p = projects.find(x => x.id === projectId);
+        headerTitle.textContent = p ? `🤖 ${p.name}` : '🤖 Jay Robot';
+      } catch {}
+
+      // Reset chat
+      document.getElementById('messages').innerHTML = `
+        <div class="empty-hint" id="chat-empty-hint">
+          <div>💬 開始提問</div>
+          <p>上傳文件後，輸入問題，Jay Robot 會根據 NPDS 文件回答</p>
+        </div>`;
+
+      // Reset upload
+      selectedFile = null;
+      document.getElementById('upload-btn').disabled = true;
+      document.getElementById('drop-label').innerHTML = '拖曳 .md 檔案到這裡<br>或點擊選取';
+      document.getElementById('phase-select').value = '';
+      document.getElementById('upload-status').textContent = '';
+      document.getElementById('upload-status').className = '';
+
+      loadDocTree();
+    }
+
+    // Task 8.5: Document tree
+    async function loadDocTree() {
+      const PHASES = ['C1','C2','C3','C4','C5','C6','C7'];
+      const PHASE_NAMES = {
+        C1: 'C1 計畫', C2: 'C2 原型', C3: 'C3 EVT',
+        C4: 'C4 DVT', C5: 'C5 PVT', C6: 'C6 量產', C7: 'C7 停產'
+      };
+
+      const treeEl = document.getElementById('doc-tree');
+      treeEl.innerHTML = '<h2>文件樹</h2>';
+
+      try {
+        const res = await fetch(`/api/projects/${currentProjectId}/documents`);
+        const tree = await res.json();
+
+        for (const phase of PHASES) {
+          const files = tree[phase] || [];
+          const hasFiles = files.length > 0;
+
+          const node = document.createElement('div');
+          node.className = 'phase-node';
+
+          const header = document.createElement('div');
+          header.className = `phase-header ${hasFiles ? 'has-files' : 'no-files'}`;
+          header.innerHTML = `
+            <span class="phase-toggle">▶</span>
+            <span class="phase-label">${PHASE_NAMES[phase]}</span>
+            <span class="phase-count ${hasFiles ? '' : 'empty'}">${files.length}</span>
+          `;
+
+          const fileList = document.createElement('div');
+          fileList.className = 'phase-files';
+          if (hasFiles) {
+            files.forEach(f => {
+              const el = document.createElement('div');
+              el.className = 'phase-file';
+              el.title = f;
+              el.textContent = f;
+              fileList.appendChild(el);
+            });
+          } else {
+            const hint = document.createElement('div');
+            hint.className = 'phase-empty-hint';
+            hint.textContent = '尚未上傳';
+            fileList.appendChild(hint);
+          }
+
+          header.addEventListener('click', () => {
+            const toggle = header.querySelector('.phase-toggle');
+            const isOpen = fileList.classList.toggle('open');
+            toggle.classList.toggle('open', isOpen);
+          });
+
+          node.appendChild(header);
+          node.appendChild(fileList);
+          treeEl.appendChild(node);
+        }
+      } catch (err) {
+        treeEl.innerHTML += '<div style="color:#aaa;font-size:0.82rem;padding:8px">載入失敗</div>';
+      }
+    }
+
+    // Task 8.6: Upload with phase selection
+    const dropZone  = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
     const uploadBtn = document.getElementById('upload-btn');
     const uploadStatus = document.getElementById('upload-status');
-    let selectedFile = null;
 
     dropZone.addEventListener('click', () => fileInput.click());
-
-    dropZone.addEventListener('dragover', e => {
-      e.preventDefault();
-      dropZone.classList.add('drag-over');
-    });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', e => {
       e.preventDefault();
       dropZone.classList.remove('drag-over');
-      const file = e.dataTransfer.files[0];
-      if (file) selectFile(file);
+      if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
     });
-
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files[0]) selectFile(fileInput.files[0]);
-    });
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
 
     function selectFile(file) {
       selectedFile = file;
-      dropZone.querySelector('div').textContent = file.name;
-      uploadBtn.disabled = false;
+      document.getElementById('drop-label').textContent = file.name;
+      checkUploadReady();
       setStatus('', '');
     }
 
+    document.getElementById('phase-select').addEventListener('change', checkUploadReady);
+
+    function checkUploadReady() {
+      const phase = document.getElementById('phase-select').value;
+      uploadBtn.disabled = !(selectedFile && phase);
+    }
+
     uploadBtn.addEventListener('click', async () => {
-      if (!selectedFile) return;
+      if (!selectedFile || !currentProjectId) return;
+      const phase = document.getElementById('phase-select').value;
+      if (!phase) return;
+
       uploadBtn.disabled = true;
       setStatus('上傳中...', 'info');
 
       const formData = new FormData();
       formData.append('file', selectedFile);
+      formData.append('project_id', currentProjectId);
+      formData.append('phase', phase);
 
       try {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -259,11 +674,12 @@
           uploadBtn.disabled = false;
         } else {
           setStatus(`✓ ${data.message}（${data.chunks} 個段落）`, 'success');
-          document.getElementById('send-btn').disabled = false;
-          clearEmptyHint();
           selectedFile = null;
           fileInput.value = '';
-          dropZone.querySelector('div').textContent = '拖曳 .md 檔案到這裡\n或點擊選取';
+          document.getElementById('drop-label').innerHTML = '拖曳 .md 檔案到這裡<br>或點擊選取';
+          document.getElementById('phase-select').value = '';
+          uploadBtn.disabled = true;
+          loadDocTree(); // refresh tree
         }
       } catch (err) {
         setStatus(`網路錯誤：${err.message}`, 'error');
@@ -276,22 +692,14 @@
       uploadStatus.className = type;
     }
 
-    // ── Chat ──
-    const messagesEl = document.getElementById('messages');
+    // ── Chat (Task 8.7) ──
+    const messagesEl    = document.getElementById('messages');
     const questionInput = document.getElementById('question-input');
-    const sendBtn = document.getElementById('send-btn');
+    const sendBtn       = document.getElementById('send-btn');
     let currentController = null;
 
-    function clearEmptyHint() {
-      const hint = messagesEl.querySelector('.empty-hint');
-      if (hint) hint.remove();
-    }
-
     questionInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendQuestion();
-      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion(); }
     });
     sendBtn.addEventListener('click', sendQuestion);
 
@@ -299,21 +707,16 @@
       const question = questionInput.value.trim();
       if (!question) return;
 
-      // Abort any in-progress stream
-      if (currentController) {
-        currentController.abort();
-        currentController = null;
-      }
+      if (currentController) { currentController.abort(); currentController = null; }
 
-      clearEmptyHint();
+      const hint = document.getElementById('chat-empty-hint');
+      if (hint) hint.remove();
+
       questionInput.value = '';
       questionInput.disabled = true;
       sendBtn.disabled = true;
 
-      // User bubble
       appendMessage('user', question);
-
-      // Assistant bubble (streaming)
       const { bubble, sourcesEl } = appendAssistantBubble();
 
       currentController = new AbortController();
@@ -322,7 +725,8 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question }),
+          // Task 8.7: include project_id
+          body: JSON.stringify({ question, project_id: currentProjectId }),
           signal: currentController.signal,
         });
 
@@ -342,7 +746,6 @@
             if (!line.startsWith('data: ')) continue;
             const raw = line.slice(6).trim();
             if (raw === '[DONE]') break;
-
             try {
               const event = JSON.parse(raw);
               if (event.type === 'token') {
@@ -357,9 +760,7 @@
           }
         }
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          bubble.textContent = `錯誤：${err.message}`;
-        }
+        if (err.name !== 'AbortError') bubble.textContent = `錯誤：${err.message}`;
       } finally {
         currentController = null;
         questionInput.disabled = false;
@@ -383,13 +784,10 @@
     function appendAssistantBubble() {
       const msg = document.createElement('div');
       msg.className = 'message assistant';
-
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-
       const sourcesEl = document.createElement('div');
       sourcesEl.className = 'sources';
-
       msg.appendChild(bubble);
       msg.appendChild(sourcesEl);
       messagesEl.appendChild(msg);
@@ -402,8 +800,15 @@
         el.innerHTML = '<strong>來源：</strong>無相關文件';
         return;
       }
-      const items = sources.map(s => `<li>${s}</li>`).join('');
-      el.innerHTML = `<strong>來源：</strong><ul>${items}</ul>`;
+      el.innerHTML = `<strong>來源：</strong><ul>${sources.map(s => `<li>${escHtml(s)}</li>`).join('')}</ul>`;
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function formatDate(iso) {
+      return new Date(iso).toLocaleDateString('zh-TW', { year:'numeric', month:'2-digit', day:'2-digit' });
     }
   </script>
 </body>

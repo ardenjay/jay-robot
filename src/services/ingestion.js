@@ -53,7 +53,7 @@ function splitLongChunk(text, title) {
   return result;
 }
 
-async function ingestFile(filePath, filename, llmAdapter, vectorAdapter) {
+async function ingestFile(filePath, filename, projectId, phase, llmAdapter, vectorAdapter) {
   const adapter = llmAdapter || llm;
   const store = vectorAdapter || vectorStore;
 
@@ -66,10 +66,10 @@ async function ingestFile(filePath, filename, llmAdapter, vectorAdapter) {
   const embeddedChunks = [];
   for (const chunk of rawChunks) {
     const embedding = await adapter.embed(chunk.text);
-    embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding });
+    embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding, projectId, phase });
   }
 
-  await store.clear(docId);
+  await store.clear(docId, projectId);
   await store.add(embeddedChunks);
 
   return embeddedChunks.length;

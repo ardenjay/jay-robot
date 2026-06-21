@@ -35,11 +35,11 @@ describe('ingestion pipeline', () => {
     const store = new SqliteVectorAdapter(dbPath);
     await store._ready;
 
-    const count = await ingestFile(mdPath, 'test.md', mockLLM, store);
+    const count = await ingestFile(mdPath, 'test.md', 'proj-test', 'C1', mockLLM, store);
     assert.equal(count, 3, 'ingestFile 應回傳 3');
-    assert.equal(store.isEmpty(), false);
+    assert.equal(store.isEmpty('proj-test'), false);
 
-    const results = await store.search(new Array(3072).fill(0), 10);
+    const results = await store.search(new Array(3072).fill(0), 10, 'proj-test');
     assert.equal(results.length, 3, 'DB 中應有 3 筆');
   });
 
@@ -54,10 +54,10 @@ describe('ingestion pipeline', () => {
     const store = new SqliteVectorAdapter(dbPath);
     await store._ready;
 
-    await ingestFile(mdPath1, 'doc.md', mockLLM, store);
-    await ingestFile(mdPath2, 'doc.md', mockLLM, store);
+    await ingestFile(mdPath1, 'doc.md', 'proj-test', 'C1', mockLLM, store);
+    await ingestFile(mdPath2, 'doc.md', 'proj-test', 'C1', mockLLM, store);
 
-    const results = await store.search(new Array(3072).fill(0), 10);
+    const results = await store.search(new Array(3072).fill(0), 10, 'proj-test');
     assert.equal(results.length, 2, 'DB 應只有第二次的 2 個 chunks');
     const titles = results.map(r => r.title);
     assert.ok(titles.includes('新章節一'));

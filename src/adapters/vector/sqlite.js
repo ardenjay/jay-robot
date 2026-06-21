@@ -32,15 +32,30 @@ class SqliteVectorAdapter extends VectorAdapter {
     } else {
       this.db = new SQL.Database();
     }
+
+    // Task 1.1: projects table
     this.db.run(`
-      CREATE TABLE IF NOT EXISTS chunks (
-        id        INTEGER PRIMARY KEY AUTOINCREMENT,
-        doc_id    TEXT NOT NULL,
-        title     TEXT,
-        content   TEXT NOT NULL,
-        embedding TEXT NOT NULL
+      CREATE TABLE IF NOT EXISTS projects (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS chunks (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_id     TEXT NOT NULL,
+        title      TEXT,
+        content    TEXT NOT NULL,
+        embedding  TEXT NOT NULL
+      );
+    `);
+
+    // Task 1.2: migration — add columns if absent (SQLite errors if already exist)
+    try { this.db.run(`ALTER TABLE chunks ADD COLUMN project_id TEXT DEFAULT 'default'`); } catch {}
+    try { this.db.run(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
+
     this._persist();
   }
 
@@ -50,27 +65,44 @@ class SqliteVectorAdapter extends VectorAdapter {
     fs.writeFileSync(this.dbPath, Buffer.from(data));
   }
 
+  // Task 2.1
   async add(chunks) {
     await this._ready;
     const stmt = this.db.prepare(
-      'INSERT INTO chunks (doc_id, title, content, embedding) VALUES (?, ?, ?, ?)'
+      'INSERT INTO chunks (doc_id, title, content, embedding, project_id, phase) VALUES (?, ?, ?, ?, ?, ?)'
     );
     for (const chunk of chunks) {
-      stmt.run([chunk.docId, chunk.title || '', chunk.text, JSON.stringify(chunk.embedding)]);
+      stmt.run([
+        chunk.docId,
+        chunk.title || '',
+        chunk.text,
+        JSON.stringify(chunk.embedding),
+        chunk.projectId || 'default',
+        chunk.phase || '',
+      ]);
     }
     stmt.free();
     this._persist();
   }
 
-  async search(vector, topK = 5) {
+  // Task 2.2: projectId optional — omit to search all
+  async search(vector, topK = 5, projectId) {
     await this._ready;
-    const rows = this.db.exec('SELECT id, doc_id, title, content, embedding FROM chunks');
-    if (!rows.length || !rows[0].values.length) return [];
+    const sql = projectId
+      ? 'SELECT id, doc_id, title, content, embedding FROM chunks WHERE project_id = ?'
+      : 'SELECT id, doc_id, title, content, embedding FROM chunks';
+    const stmt = this.db.prepare(sql);
+    if (projectId) stmt.bind([projectId]);
 
-    const scored = rows[0].values.map(([id, docId, title, content, embJson]) => {
-      const emb = JSON.parse(embJson);
-      const similarity = cosineSimilarity(vector, emb);
-      return { id, docId, title, text: content, similarity };
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+
+    if (!rows.length) return [];
+
+    const scored = rows.map(row => {
+      const emb = JSON.parse(row.embedding);
+      return { id: row.id, docId: row.doc_id, title: row.title, text: row.content, similarity: cosineSimilarity(vector, emb) };
     });
 
     scored.sort((a, b) => b.similarity - a.similarity);
@@ -83,17 +115,58 @@ class SqliteVectorAdapter extends VectorAdapter {
     }));
   }
 
-  async clear(docId) {
+  // Task 2.3: projectId optional for backward compat
+  async clear(docId, projectId) {
     await this._ready;
-    this.db.run('DELETE FROM chunks WHERE doc_id = ?', [docId]);
+    if (projectId) {
+      this.db.run('DELETE FROM chunks WHERE doc_id = ? AND project_id = ?', [docId, projectId]);
+    } else {
+      this.db.run('DELETE FROM chunks WHERE doc_id = ?', [docId]);
+    }
     this._persist();
   }
 
-  isEmpty() {
+  // Task 2.4
+  async listDocuments(projectId) {
+    await this._ready;
+    const stmt = this.db.prepare(
+      'SELECT DISTINCT phase, doc_id FROM chunks WHERE project_id = ? ORDER BY phase, doc_id'
+    );
+    stmt.bind([projectId]);
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows.map(r => ({ phase: r.phase, docId: r.doc_id }));
+  }
+
+  isEmpty(projectId) {
     if (!this.db) return true;
-    const result = this.db.exec('SELECT COUNT(*) as count FROM chunks');
-    if (!result.length) return true;
-    return result[0].values[0][0] === 0;
+    const sql = projectId
+      ? 'SELECT COUNT(*) FROM chunks WHERE project_id = ?'
+      : 'SELECT COUNT(*) FROM chunks';
+    const stmt = this.db.prepare(sql);
+    if (projectId) stmt.bind([projectId]);
+    stmt.step();
+    const count = stmt.getAsObject()['COUNT(*)'];
+    stmt.free();
+    return count === 0;
+  }
+
+  async createProject(id, name) {
+    await this._ready;
+    const created_at = new Date().toISOString();
+    this.db.run('INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)', [id, name, created_at]);
+    this._persist();
+    return { id, name, created_at };
+  }
+
+  async listProjects() {
+    await this._ready;
+    const stmt = this.db.prepare('SELECT id, name, created_at FROM projects ORDER BY created_at DESC');
+    const rows = [];
+    while (stmt.step()) rows.push(stmt.getAsObject());
+    stmt.free();
+    return rows;
   }
 }
 

@@ -4,7 +4,7 @@ const { answer } = require('../services/retrieval');
 const router = express.Router();
 
 router.post('/', async (req, res) => {
-  const { question } = req.body;
+  const { question, project_id } = req.body;
   if (!question || !question.trim()) {
     return res.status(400).json({ error: '請輸入問題' });
   }
@@ -15,7 +15,7 @@ router.post('/', async (req, res) => {
   res.flushHeaders();
 
   try {
-    for await (const event of answer(question.trim())) {
+    for await (const event of answer(question.trim(), project_id)) {
       if (typeof event === 'string') {
         // Empty DB message
         res.write(`data: ${JSON.stringify({ type: 'token', value: event })}\n\n`);
