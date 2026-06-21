@@ -506,6 +506,7 @@
 
   </div>
 
+  <script src="/vendor/marked.min.js"></script>
   <script>
     // ── State ──
     let currentProjectId = null;
@@ -907,6 +908,7 @@
 
       appendMessage('user', question);
       const { bubble, sourcesEl } = appendAssistantBubble();
+      let answerMd = '';  // 累積原始 Markdown，逐 token 重新渲染
 
       currentController = new AbortController();
 
@@ -938,7 +940,8 @@
             try {
               const event = JSON.parse(raw);
               if (event.type === 'token') {
-                bubble.textContent += event.value;
+                answerMd += event.value;
+                bubble.innerHTML = marked.parse(answerMd);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
               } else if (event.type === 'sources') {
                 renderSources(sourcesEl, event.value);
