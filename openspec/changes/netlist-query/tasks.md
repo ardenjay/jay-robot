@@ -34,16 +34,16 @@
 
 ## 階段四：retrieval 工具迴圈（核心端到端，可驗收）
 
-- [ ] 4.1 `answer()` 重構為工具迴圈：組工具集（`search_documents` + 該專案 netlist 工具）→ `chatWithTools` → 執行 functionCall、回填、再呼叫 → 直到最終文字
-- [ ] 4.2 現有向量 RAG 包成 `search_documents` 工具
-- [ ] 4.3 system prompt 強指令：連線/零件/net/腳位問題必須用 netlist 工具
-- [ ] 4.4 串接最終 token 串流與文件來源
+- [x] 4.1 `answer()` 重構為工具迴圈：組工具集（`search_documents` + 該專案 netlist 工具）→ `chatWithTools` → 執行 functionCall、回填、再呼叫 → 直到最終文字
+- [x] 4.2 現有向量 RAG 包成 `search_documents` 工具
+- [x] 4.3 system prompt 強指令：連線/零件/net/腳位問題必須用 netlist 工具
+- [x] 4.4 串接最終 token 串流與文件來源
 
 **✅ 階段四驗收（端到端；隔離 vector DB、唯讀 netlist）**
-- [ ] 4.5 用**隔離/暫存 vector DB**啟動 app（不碰正式 `data/rag.db`），對 100T 問「U42 第 4 腳接到哪個 net？」→ 答案需與 `netparse part U42 --json` 真值相符
-- [ ] 4.6 問文件問題（用測試文件）→ 確認走 `search_documents`
-- [ ] 4.7 無 netlist 的專案 → 只提供文件工具、不報錯
-- [ ] 4.8 `npm test` 綠
+- [x] 4.5 用**隔離/暫存 vector DB**啟動 app（不碰正式 `data/rag.db`），對 100T 問「U42 第 4 腳接到哪個 net？」→ 答案需與 `netparse part U42 --json` 真值相符
+- [x] 4.6 問文件問題（用測試文件）→ 確認走 `search_documents`
+- [x] 4.7 無 netlist 的專案 → 只提供文件工具、不報錯
+- [x] 4.8 `npm test` 綠
 
 ## 階段五：大網/電源處理（可獨立驗收）
 
