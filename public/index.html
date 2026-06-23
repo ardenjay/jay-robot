@@ -383,6 +383,17 @@
     .sources ul { padding-left: 16px; margin-top: 4px; }
     .sources li { margin-bottom: 2px; }
 
+    .tool-log { margin-bottom: 6px; }
+    .tool-call {
+      font-size: 0.78rem;
+      color: #6b7280;
+      background: #f3f4f6;
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-bottom: 3px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
     .input-row {
       padding: 16px 24px;
       background: #fff;
@@ -907,7 +918,7 @@
       sendBtn.disabled = true;
 
       appendMessage('user', question);
-      const { bubble, sourcesEl } = appendAssistantBubble();
+      const { bubble, sourcesEl, toolsEl } = appendAssistantBubble();
       let answerMd = '';  // 累積原始 Markdown，逐 token 重新渲染
 
       currentController = new AbortController();
@@ -943,6 +954,13 @@
                 answerMd += event.value;
                 bubble.innerHTML = marked.parse(answerMd);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
+              } else if (event.type === 'tool') {
+                const line = document.createElement('div');
+                line.className = 'tool-call';
+                const argStr = event.args && Object.keys(event.args).length ? JSON.stringify(event.args) : '';
+                line.textContent = `🔧 ${event.name}${argStr ? ' ' + argStr : ''}`;
+                toolsEl.appendChild(line);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
               } else if (event.type === 'sources') {
                 renderSources(sourcesEl, event.value);
               } else if (event.type === 'error') {
@@ -976,15 +994,18 @@
     function appendAssistantBubble() {
       const msg = document.createElement('div');
       msg.className = 'message assistant';
+      const toolsEl = document.createElement('div');
+      toolsEl.className = 'tool-log';
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
       const sourcesEl = document.createElement('div');
       sourcesEl.className = 'sources';
+      msg.appendChild(toolsEl);
       msg.appendChild(bubble);
       msg.appendChild(sourcesEl);
       messagesEl.appendChild(msg);
       messagesEl.scrollTop = messagesEl.scrollHeight;
-      return { bubble, sourcesEl };
+      return { bubble, sourcesEl, toolsEl };
     }
 
     function renderSources(el, sources) {

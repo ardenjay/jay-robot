@@ -56,8 +56,8 @@
 
 ## 階段六：SSE tool 事件 + UI（可驗收）
 
-- [ ] 6.1 retrieval/chat：工具呼叫前發 `{type:'tool', …}` 事件
-- [ ] 6.2 `public/index.html`：顯示「正在呼叫 X」，最終答案接續 Markdown 渲染
+- [x] 6.1 retrieval/chat：工具呼叫前發 `{type:'tool', …}` 事件
+- [x] 6.2 `public/index.html`：顯示「正在呼叫 X」，最終答案接續 Markdown 渲染
 
 **✅ 階段六驗收（觀察 + 半決定性）**
 - [ ] 6.3 `curl` chat SSE 端點問一題會用工具的問題 → 串流中 grep 得到 `"type":"tool"` 事件

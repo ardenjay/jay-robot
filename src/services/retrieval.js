@@ -93,6 +93,7 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
     const responseParts = [];
     for (const fc of functionCalls) {
       console.log(`[tool] ${fc.name}(${JSON.stringify(fc.args)})`);
+      yield { type: 'tool', name: fc.name, args: fc.args || {} };
       let response;
       if (fc.name === 'search_documents') {
         response = await runSearchDocuments(adapter, store, fc.args.query || question, projectId, sources);

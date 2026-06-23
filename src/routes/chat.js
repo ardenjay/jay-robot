@@ -23,6 +23,8 @@ router.post('/', async (req, res) => {
         res.write(`data: ${JSON.stringify({ type: 'token', value: event.value })}\n\n`);
       } else if (event.type === 'sources') {
         res.write(`data: ${JSON.stringify({ type: 'sources', value: event.value })}\n\n`);
+      } else if (event.type === 'tool') {
+        res.write(`data: ${JSON.stringify({ type: 'tool', name: event.name, args: event.args })}\n\n`);
       }
     }
   } catch (err) {
