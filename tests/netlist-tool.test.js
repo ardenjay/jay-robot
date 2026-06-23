@@ -4,6 +4,7 @@ const {
   hasNetlist,
   netlistDir,
   queryPart,
+  queryNet,
   queryTrace,
   runNetlistTool,
   NETLIST_TOOL_DECLARATIONS,
@@ -58,5 +59,30 @@ describe('netlist tool service', () => {
     const names = NETLIST_TOOL_DECLARATIONS.map(d => d.name);
     assert.ok(names.includes('netlist_part'));
     assert.ok(names.includes('netlist_trace'));
+  });
+
+  it('truncates a large net (GND) and includes a summary', async () => {
+    const r = await queryNet('100T', 'GND');
+    assert.equal(r.ok, true);
+    assert.equal(r.result.found, true);
+    assert.equal(r.result.truncated, true, '大網應被截斷');
+    assert.ok(r.result.node_count > r.result.nodes.length, '只回傳部分節點');
+    assert.equal(r.result.summary.total, r.result.node_count, '摘要含總數');
+    assert.ok(r.result.summary.by_prefix && Object.keys(r.result.summary.by_prefix).length > 0, '摘要含前綴統計');
+  });
+
+  it('does not truncate a small signal net', async () => {
+    const r = await queryNet('100T', 'RTL5G1_CLKREQ_N');
+    assert.equal(r.result.found, true);
+    assert.equal(r.result.truncated, false);
+    assert.equal(r.result.nodes.length, r.result.node_count);
+  });
+
+  it('trace from a power pin warns instead of exploding', async () => {
+    const r = await queryTrace('100T', 'U42.1'); // U42.1 在 VDD_0V95_RTL0
+    assert.equal(r.ok, true);
+    assert.equal(r.result.power_net, true, '應標記為電源/地網');
+    assert.ok(r.result.warning, '應有警告');
+    assert.equal(r.result.path_count, 0, '不展開路徑');
   });
 });

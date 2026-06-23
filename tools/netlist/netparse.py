@@ -33,6 +33,19 @@ def prefix(refdes):
     return m.group() if m else ''
 
 
+# 電源/地網名稱樣式（這類大網,trace 起點意義不大、會爆量）
+POWER_NET_RE = re.compile(r'(^|[_\-])(GND|VSS|VDD|VCC|VBAT|VBUS|VIN|VOUT|AVDD|DVDD|VEE|VREF|VPP)', re.I)
+
+
+def is_power_net(name):
+    return bool(name) and (bool(POWER_NET_RE.search(name)) or 'GND' in name.upper())
+
+
+NET_NODE_LIMIT = 50    # net 查詢超過此節點數 → 截斷 + 摘要
+NET_SHOW = 30          # 截斷後顯示前 N 個節點
+TRACE_NET_LIMIT = 30   # trace 起點所在 net 超過此節點數(或為電源/地) → 警告不展開
+
+
 class Netlist:
     def __init__(self, dir_):
         self.dir = dir_
@@ -194,7 +207,14 @@ class Netlist:
         nodes = [dict(refdes=rd, pin=pn, part=self.part_label(rd),
                       label=self.pin_label.get((rd, pn)))
                  for rd, pn in self.net_to_nodes[resolved]]
-        return dict(query=netname, found=True, net=resolved,
+        # 大網(如電源/地)截斷 + 摘要,避免輸出爆量
+        if len(nodes) > NET_NODE_LIMIT:
+            by_prefix = collections.Counter(prefix(n['refdes']) for n in nodes)
+            return dict(query=netname, found=True, net=resolved, node_count=len(nodes),
+                        truncated=True, shown=NET_SHOW,
+                        summary=dict(total=len(nodes), by_prefix=dict(by_prefix.most_common())),
+                        nodes=nodes[:NET_SHOW], suggestions=suggestions)
+        return dict(query=netname, found=True, net=resolved, truncated=False,
                     node_count=len(nodes), nodes=nodes, suggestions=suggestions)
 
     def q_pin(self, label):
@@ -212,6 +232,14 @@ class Netlist:
         rd0, pn0 = start.split('.', 1)
         if (rd0, pn0) not in self.pin_to_net:
             return dict(start=start, found=False, error=f"查無此腳: {start}")
+        # 起點若在電源/地或大型網路,追線會爆量且意義不大 → 回警告改道,不展開
+        start_net = self.pin_to_net[(rd0, pn0)]
+        start_size = len(self.net_to_nodes.get(start_net, []))
+        if is_power_net(start_net) or start_size > TRACE_NET_LIMIT:
+            return dict(start=start, found=True, net=start_net, node_count=start_size,
+                        power_net=True, path_count=0,
+                        warning=f"起點 {start} 位於電源/地或大型網路「{start_net}」({start_size} 個節點),追線會產生大量路徑且意義不大。",
+                        suggestion=f"建議改用 net 查詢該網路(net {start_net}),或改從訊號腳位追線。")
         pass_pref = list(PASS_THROUGH_PREFIX) + (['C'] if hop_cap else [])
         visited_nets, endpoints = set(), []
         queue = [(rd0, pn0, [dict(refdes=rd0, pin=pn0, part=self.part_label(rd0))])]
