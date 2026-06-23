@@ -25,12 +25,12 @@
 
 ## 階段三：llm-adapter 工具呼叫（可獨立驗收）
 
-- [ ] 3.1 `base.js` 新增 `chatWithTools(messages, tools)`
-- [ ] 3.2 `gemini.js` 實作：SDK `functionDeclarations` 送工具、解析 `functionCall`、`functionResponse` 回填續呼；預設 `AUTO`；沿用 `withBackoff`
+- [x] 3.1 `base.js` 新增 `chatWithTools(messages, tools)`
+- [x] 3.2 `gemini.js` 實作：SDK `functionDeclarations` 送工具、解析 `functionCall`、`functionResponse` 回填續呼；預設 `AUTO`；沿用 `withBackoff`
 
 **✅ 階段三驗收（決定性 stub + 可選一次真呼叫）**
-- [ ] 3.3 stub client 測試：`chatWithTools` 有把 tools 傳進去；回應含 `functionCall` 時能解析出 {name,args}；回填 `functionResponse` 後能續呼
-- [ ] 3.4（可選，耗一次 API）真實呼叫一題明確需要工具的問題，確認 Gemini 回 `functionCall`
+- [x] 3.3 stub client 測試：`chatWithTools` 有把 tools 傳進去；回應含 `functionCall` 時能解析出 {name,args}；回填 `functionResponse` 後能續呼
+- [x] 3.4（可選，耗一次 API）真實呼叫一題明確需要工具的問題，確認 Gemini 回 `functionCall`
 
 ## 階段四：retrieval 工具迴圈（核心端到端，可驗收）
 
