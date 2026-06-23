@@ -3,9 +3,20 @@ const LLMAdapter = require('./base');
 
 const EMBED_MODEL = 'gemini-embedding-001';
 const GEN_MODEL = 'gemini-2.5-flash';
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 5;
+const MAX_BACKOFF_MS = 60_000;
 // 低 temperature：RAG 任務要忠於文件、回答一致，避免同問題隨機放棄作答
 const GEN_TEMPERATURE = 0.2;
+
+// 從 429 errorDetails 取出伺服器建議的 RetryInfo.retryDelay（如 "17s"），回傳毫秒；無則 null
+function parseRetryDelayMs(err) {
+  const details = err && err.errorDetails;
+  if (!Array.isArray(details)) return null;
+  const info = details.find(d => typeof d['@type'] === 'string' && d['@type'].includes('RetryInfo'));
+  if (!info || !info.retryDelay) return null;
+  const m = String(info.retryDelay).match(/([\d.]+)s/);
+  return m ? Math.round(parseFloat(m[1]) * 1000) : null;
+}
 
 async function withBackoff(fn) {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -14,7 +25,9 @@ async function withBackoff(fn) {
     } catch (err) {
       const isRateLimit = err.status === 429 || (err.message && err.message.includes('429'));
       if (!isRateLimit || attempt === MAX_RETRIES - 1) throw err;
-      const delay = Math.pow(2, attempt) * 1000;
+      // 優先依伺服器建議的 retryDelay 等待，否則指數退避；皆設上限
+      const suggested = parseRetryDelayMs(err);
+      const delay = Math.min(suggested ?? Math.pow(2, attempt) * 1000, MAX_BACKOFF_MS);
       await new Promise(res => setTimeout(res, delay));
     }
   }
@@ -33,6 +46,18 @@ class GeminiAdapter extends LLMAdapter {
       const model = this.client.getGenerativeModel({ model: EMBED_MODEL });
       const result = await model.embedContent(text);
       return result.embedding.values;
+    });
+  }
+
+  // 批次 embedding：一次送多筆，減少 API 請求數（降低 429 風險）。回傳與輸入同序的向量陣列。
+  async embedBatch(texts) {
+    if (texts.length === 0) return [];
+    return withBackoff(async () => {
+      const model = this.client.getGenerativeModel({ model: EMBED_MODEL });
+      const result = await model.batchEmbedContents({
+        requests: texts.map(text => ({ content: { parts: [{ text }] } })),
+      });
+      return result.embeddings.map(e => e.values);
     });
   }
 

@@ -15,6 +15,9 @@ const mockLLM = {
   async embed() {
     return new Array(3072).fill(0);
   },
+  async embedBatch(texts) {
+    return texts.map(() => new Array(3072).fill(0));
+  },
 };
 
 describe('ingestion pipeline', () => {

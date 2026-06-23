@@ -1,8 +1,4 @@
-## Purpose
-
-TBD — LLM Adapter capability for the markdown-rag-chatbot. Defines the interface contract for LLM providers and provides a swappable adapter pattern for embedding and text generation.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: LLMAdapter interface contract
 所有 LLMAdapter 實作 SHALL 繼承 base class 並實作下列方法：`embed(text)`、`embedBatch(texts)`、`generate(prompt)`、`stream(prompt)`。
@@ -45,10 +41,3 @@ TBD — LLM Adapter capability for the markdown-rag-chatbot. Defines the interfa
 #### Scenario: Retry respects server retry delay on 429
 - **WHEN** embedding 或生成請求回傳 429 且 `errorDetails` 含 `RetryInfo.retryDelay`
 - **THEN** 系統等待該建議時間後重試；若無 `retryDelay` 則採指數退避，於達到重試上限後才拋出錯誤
-
-### Requirement: Adapter is swappable via configuration
-系統 SHALL 透過環境變數決定載入哪個 LLMAdapter，上層 service 程式碼無需修改。
-
-#### Scenario: Switch LLM adapter via environment variable
-- **WHEN** 環境變數 `LLM_ADAPTER=claude` 被設定
-- **THEN** 系統載入 `ClaudeAdapter` 而非預設的 Gemini 實作

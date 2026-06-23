@@ -4,6 +4,8 @@ const llm = require('../adapters/llm');
 const vectorStore = require('../adapters/vector');
 
 const MAX_CHUNK_LENGTH = 1500;
+// 批次 embedding 每批筆數，降低 API 請求數與 429 風險
+const EMBED_BATCH_SIZE = 100;
 
 function parseAndChunk(markdownText, filename) {
   const tokens = marked.lexer(markdownText);
@@ -64,9 +66,12 @@ async function ingestFile(filePath, filename, projectId, phase, llmAdapter, vect
   if (rawChunks.length === 0) return 0;
 
   const embeddedChunks = [];
-  for (const chunk of rawChunks) {
-    const embedding = await adapter.embed(chunk.text);
-    embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding, projectId, phase });
+  for (let i = 0; i < rawChunks.length; i += EMBED_BATCH_SIZE) {
+    const batch = rawChunks.slice(i, i + EMBED_BATCH_SIZE);
+    const embeddings = await adapter.embedBatch(batch.map(c => c.text));
+    batch.forEach((chunk, j) => {
+      embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding: embeddings[j], projectId, phase });
+    });
   }
 
   await store.clear(docId, projectId);
