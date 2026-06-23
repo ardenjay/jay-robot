@@ -5,6 +5,11 @@ const adapters = {
     const GeminiAdapter = require('./gemini');
     return new GeminiAdapter();
   },
+  // 測試用假 LLM：不打真實 API、不耗配額，仍完整跑工具呼叫流程
+  mock: () => {
+    const MockAdapter = require('./mock');
+    return new MockAdapter();
+  },
 };
 
 if (!adapters[adapterName]) {
