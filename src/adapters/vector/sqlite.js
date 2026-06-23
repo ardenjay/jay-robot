@@ -1,4 +1,4 @@
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const VectorAdapter = require('./base');
@@ -20,83 +20,63 @@ class SqliteVectorAdapter extends VectorAdapter {
   constructor(dbPath) {
     super();
     this.dbPath = dbPath || DB_PATH;
-    this.db = null;
-    this._ready = this._init();
-  }
+    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
 
-  async _init() {
-    const SQL = await initSqlJs();
-    if (fs.existsSync(this.dbPath)) {
-      const fileBuffer = fs.readFileSync(this.dbPath);
-      this.db = new SQL.Database(fileBuffer);
-    } else {
-      this.db = new SQL.Database();
-    }
+    // 檔案型 SQLite：寫入直接進檔、有交易與檔案鎖；WAL 提供較佳並行與崩潰耐受。
+    // 不再把整個 DB 載入記憶體後整檔覆寫，避免多實例交疊互蓋造成資料遺失。
+    this.db = new Database(this.dbPath);
+    this.db.pragma('journal_mode = WAL');
 
-    // Task 1.1: projects table
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS projects (
         id         TEXT PRIMARY KEY,
         name       TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
     `);
-
-    this.db.run(`
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS chunks (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         doc_id     TEXT NOT NULL,
         title      TEXT,
         content    TEXT NOT NULL,
-        embedding  TEXT NOT NULL
+        embedding  TEXT NOT NULL,
+        project_id TEXT DEFAULT 'default',
+        phase      TEXT DEFAULT ''
       );
     `);
+    // 對舊版（缺欄位）的 DB 檔做相容遷移；欄位已存在時 SQLite 會報錯，忽略即可
+    try { this.db.exec(`ALTER TABLE chunks ADD COLUMN project_id TEXT DEFAULT 'default'`); } catch {}
+    try { this.db.exec(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
 
-    // Task 1.2: migration — add columns if absent (SQLite errors if already exist)
-    try { this.db.run(`ALTER TABLE chunks ADD COLUMN project_id TEXT DEFAULT 'default'`); } catch {}
-    try { this.db.run(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
-
-    this._persist();
+    // 維持與舊介面相容：呼叫端仍可 `await store._ready`
+    this._ready = Promise.resolve();
   }
 
-  _persist() {
-    const data = this.db.export();
-    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-    fs.writeFileSync(this.dbPath, Buffer.from(data));
-  }
-
-  // Task 2.1
   async add(chunks) {
-    await this._ready;
     const stmt = this.db.prepare(
       'INSERT INTO chunks (doc_id, title, content, embedding, project_id, phase) VALUES (?, ?, ?, ?, ?, ?)'
     );
-    for (const chunk of chunks) {
-      stmt.run([
-        chunk.docId,
-        chunk.title || '',
-        chunk.text,
-        JSON.stringify(chunk.embedding),
-        chunk.projectId || 'default',
-        chunk.phase || '',
-      ]);
-    }
-    stmt.free();
-    this._persist();
+    const insertMany = this.db.transaction(rows => {
+      for (const chunk of rows) {
+        stmt.run(
+          chunk.docId,
+          chunk.title || '',
+          chunk.text,
+          JSON.stringify(chunk.embedding),
+          chunk.projectId || 'default',
+          chunk.phase || ''
+        );
+      }
+    });
+    insertMany(chunks);
   }
 
-  // Task 2.2: projectId optional — omit to search all
+  // projectId optional — omit to search all
   async search(vector, topK = 5, projectId) {
-    await this._ready;
-    const sql = projectId
-      ? 'SELECT id, doc_id, title, content, embedding FROM chunks WHERE project_id = ?'
-      : 'SELECT id, doc_id, title, content, embedding FROM chunks';
-    const stmt = this.db.prepare(sql);
-    if (projectId) stmt.bind([projectId]);
-
-    const rows = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
+    const rows = projectId
+      ? this.db.prepare('SELECT id, doc_id, title, content, embedding FROM chunks WHERE project_id = ?').all(projectId)
+      : this.db.prepare('SELECT id, doc_id, title, content, embedding FROM chunks').all();
 
     if (!rows.length) return [];
 
@@ -115,64 +95,41 @@ class SqliteVectorAdapter extends VectorAdapter {
     }));
   }
 
-  // Task 2.3: projectId optional for backward compat
+  // projectId optional for backward compat
   async clear(docId, projectId) {
-    await this._ready;
     if (projectId) {
-      this.db.run('DELETE FROM chunks WHERE doc_id = ? AND project_id = ?', [docId, projectId]);
+      this.db.prepare('DELETE FROM chunks WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
     } else {
-      this.db.run('DELETE FROM chunks WHERE doc_id = ?', [docId]);
+      this.db.prepare('DELETE FROM chunks WHERE doc_id = ?').run(docId);
     }
-    this._persist();
   }
 
   async movePhase(docId, projectId, newPhase) {
-    await this._ready;
-    this.db.run('UPDATE chunks SET phase = ? WHERE doc_id = ? AND project_id = ?', [newPhase, docId, projectId]);
-    this._persist();
+    this.db.prepare('UPDATE chunks SET phase = ? WHERE doc_id = ? AND project_id = ?').run(newPhase, docId, projectId);
   }
 
-  // Task 2.4
   async listDocuments(projectId) {
-    await this._ready;
-    const stmt = this.db.prepare(
-      'SELECT DISTINCT phase, doc_id FROM chunks WHERE project_id = ? ORDER BY phase, doc_id'
-    );
-    stmt.bind([projectId]);
-    const rows = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
+    const rows = this.db
+      .prepare('SELECT DISTINCT phase, doc_id FROM chunks WHERE project_id = ? ORDER BY phase, doc_id')
+      .all(projectId);
     return rows.map(r => ({ phase: r.phase, docId: r.doc_id }));
   }
 
   isEmpty(projectId) {
-    if (!this.db) return true;
-    const sql = projectId
-      ? 'SELECT COUNT(*) FROM chunks WHERE project_id = ?'
-      : 'SELECT COUNT(*) FROM chunks';
-    const stmt = this.db.prepare(sql);
-    if (projectId) stmt.bind([projectId]);
-    stmt.step();
-    const count = stmt.getAsObject()['COUNT(*)'];
-    stmt.free();
-    return count === 0;
+    const row = projectId
+      ? this.db.prepare('SELECT COUNT(*) AS c FROM chunks WHERE project_id = ?').get(projectId)
+      : this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get();
+    return row.c === 0;
   }
 
   async createProject(id, name) {
-    await this._ready;
     const created_at = new Date().toISOString();
-    this.db.run('INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)', [id, name, created_at]);
-    this._persist();
+    this.db.prepare('INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)').run(id, name, created_at);
     return { id, name, created_at };
   }
 
   async listProjects() {
-    await this._ready;
-    const stmt = this.db.prepare('SELECT id, name, created_at FROM projects ORDER BY created_at DESC');
-    const rows = [];
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free();
-    return rows;
+    return this.db.prepare('SELECT id, name, created_at FROM projects ORDER BY created_at DESC').all();
   }
 }
 
