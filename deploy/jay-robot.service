@@ -1,0 +1,24 @@
+[Unit]
+Description=Jay Robot RAG chatbot (read-only)
+After=network.target
+
+[Service]
+Type=simple
+User=jay
+WorkingDirectory=/data/extra/jay/jay-robot
+
+# conda(MinerU/markitdown)與 python3(netparse)要在 PATH；systemd 預設環境很乾淨，必須明確給
+Environment=PATH=/home/jay/miniconda3/condabin:/home/jay/miniconda3/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# 唯讀模式：給別人用，擋掉所有寫入路由（上傳/刪除/搬移/新建專案）
+Environment=READ_ONLY=true
+# GEMINI_API_KEY 等機密從 .env 讀
+EnvironmentFile=/data/extra/jay/jay-robot/.env
+
+ExecStart=/usr/bin/node src/app.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

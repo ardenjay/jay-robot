@@ -88,16 +88,57 @@ delete, move, or create projects — only browsing and asking questions remain a
 
 When unset (the default), behavior is identical to before — full read/write.
 
-Example systemd unit for a shared, read-only instance:
+## Deploy with systemd
 
-```ini
-[Service]
-WorkingDirectory=/data/extra/jay/jay-robot
-Environment=PATH=/home/jay/miniconda3/bin:/usr/bin:/usr/local/bin
-Environment=READ_ONLY=true
-EnvironmentFile=/data/extra/jay/jay-robot/.env
-ExecStart=/usr/bin/node src/app.js
-Restart=always
+`npm start` is fine for development, but it dies when your terminal/SSH session
+closes, won't restart on crash, and won't come back after a reboot. For a real,
+shared (read-only) instance, run it as a systemd service. A version-controlled
+unit file lives at [`deploy/jay-robot.service`](deploy/jay-robot.service).
+
+> The unit sets an explicit `PATH` that includes conda
+> (`/home/jay/miniconda3/...`). This is required: systemd's default environment
+> does **not** include conda, so without it `spawn('conda', …)` (MinerU /
+> markitdown) fails with `ENOENT`. It also reads secrets such as
+> `GEMINI_API_KEY` from `.env` via `EnvironmentFile`, and sets `READ_ONLY=true`
+> for the shared instance.
+
+### Install
+
+```bash
+sudo cp /data/extra/jay/jay-robot/deploy/jay-robot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now jay-robot      # start now + on every boot
+sudo systemctl status jay-robot            # should be active (running)
 ```
 
-Run your own admin instance without `READ_ONLY` to keep full upload/edit access.
+### Verify
+
+```bash
+journalctl -u jay-robot -n 30 --no-pager   # expect "Jay Robot running" + "[Gemini] key 載入"
+curl -s localhost:3000/api/config          # → {"readOnly":true}
+curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:3000/api/upload   # → 403
+```
+
+### Day-to-day
+
+| Task | Command |
+|------|---------|
+| Apply code or `.env` changes | `sudo systemctl restart jay-robot` |
+| Tail logs | `journalctl -u jay-robot -f` |
+| Stop / disable | `sudo systemctl stop jay-robot` / `sudo systemctl disable jay-robot` |
+
+### Notes
+
+- **Restart is required** after editing files under `src/` or `.env` — env and
+  code are read at startup, not hot-reloaded.
+- **Admin (write) access:** the systemd instance is read-only. To upload/manage,
+  run your own instance **from the same working directory** on a **different
+  port** so it shares the same database:
+  ```bash
+  cd /data/extra/jay/jay-robot && PORT=3001 npm start
+  ```
+  The DB lives at `<WorkingDirectory>/data/rag.db`; running from another
+  directory would point at a different (empty) database.
+- **Never run two writing instances at once.** SQLite (better-sqlite3 + WAL)
+  safely allows many readers + one writer, so one read-only service plus one
+  admin instance is fine — but two writers can conflict.
