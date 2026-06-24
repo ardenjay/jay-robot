@@ -14,6 +14,6 @@
 ## 3. 驗收
 
 - [x] 3.1 `systemd-analyze verify deploy/jay-robot.service` 通過（unit 語法正確，exit 0）
-- [ ] 3.2 安裝並啟動後 `systemctl status jay-robot` 為 active (running)，`journalctl` 可見 "Jay Robot running" 與 "[Gemini] key 載入" 且無 spawn/ENOENT 錯誤 —— **需在主機 sudo 安裝後由使用者驗收**
-- [ ] 3.3 `curl localhost:3000/api/config` 回 `{"readOnly":true}`；`curl -X POST localhost:3000/api/upload` 回 403 —— **需安裝後驗收**
-- [ ] 3.4 驗證常駐性：關閉啟動用的終端機/連線後服務仍在；`systemctl restart` 後自動回復 —— **需安裝後驗收**
+- [x] 3.2 安裝並啟動後 `systemctl status jay-robot` 為 active (running)，`journalctl` 可見 "Jay Robot running" 與 "[Gemini] key 載入" 且無 spawn/ENOENT 錯誤 —— 主機驗收通過
+- [x] 3.3 `curl localhost:3000/api/config` 回 `{"readOnly":true}`；`curl -X POST localhost:3000/api/upload` 回 403 —— 主機驗收通過
+- [x] 3.4 驗證常駐性：關閉啟動用的終端機/連線後服務仍在；`systemctl restart` 後自動回復 —— 主機驗收通過
