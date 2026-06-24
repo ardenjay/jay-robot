@@ -39,6 +39,8 @@ class GeminiAdapter extends LLMAdapter {
     const key = apiKey || process.env.GEMINI_API_KEY;
     if (!key) throw new Error('GEMINI_API_KEY is required');
     this.client = new GoogleGenerativeAI(key);
+    // 啟動時印出載入的 key 指紋（只印前後碼，不外洩完整 key），方便確認換 key 是否生效
+    console.log(`[Gemini] key 載入：${key.slice(0, 6)}...${key.slice(-4)}（長度 ${key.length}）`);
   }
 
   async embed(text) {
