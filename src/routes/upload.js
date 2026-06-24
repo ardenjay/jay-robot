@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { ingestFile } = require('../services/ingestion');
+const { blockWhenReadOnly } = require('../middleware/readOnly');
 
 const router = express.Router();
 
@@ -91,7 +92,7 @@ function convertWithMarkitdown(filePath, onLog) {
   });
 }
 
-router.post('/', upload.single('file'), async (req, res) => {
+router.post('/', blockWhenReadOnly, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '請選擇要上傳的檔案' });
   }

@@ -1,10 +1,11 @@
 const express = require('express');
 const crypto = require('crypto');
 const vectorStore = require('../adapters/vector');
+const { blockWhenReadOnly } = require('../middleware/readOnly');
 
 const router = express.Router();
 
-router.post('/', async (req, res) => {
+router.post('/', blockWhenReadOnly, async (req, res) => {
   const { name } = req.body;
   if (!name || !name.trim()) {
     return res.status(400).json({ error: '專案名稱為必填' });
@@ -41,7 +42,7 @@ router.get('/:id/documents', async (req, res) => {
   }
 });
 
-router.delete('/:id/documents/:docId', async (req, res) => {
+router.delete('/:id/documents/:docId', blockWhenReadOnly, async (req, res) => {
   try {
     await vectorStore.clear(req.params.docId, req.params.id);
     res.json({ ok: true });
@@ -52,7 +53,7 @@ router.delete('/:id/documents/:docId', async (req, res) => {
 
 const VALID_PHASES = new Set(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']);
 
-router.patch('/:id/documents/:docId/phase', async (req, res) => {
+router.patch('/:id/documents/:docId/phase', blockWhenReadOnly, async (req, res) => {
   const { phase } = req.body;
   if (!phase || !VALID_PHASES.has(phase)) {
     return res.status(400).json({ error: 'phase 必須為 C1 至 C7' });

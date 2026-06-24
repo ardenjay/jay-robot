@@ -474,7 +474,7 @@
           <!-- phases rendered by JS -->
         </div>
 
-        <div class="sidebar-section">
+        <div class="sidebar-section" id="upload-section">
           <h2>上傳文件</h2>
           <div class="drop-zone" id="drop-zone">
             <input type="file" id="file-input" accept=".md,.markdown,.pdf,.docx,.pptx,.xlsx,.xls,.html,.htm,.csv,.json,.xml,.epub">
@@ -522,6 +522,26 @@
     // ── State ──
     let currentProjectId = null;
     let selectedFile = null;
+    let READ_ONLY = false;  // 由 /api/config 決定；true 時隱藏所有寫入入口（僅體驗，後端另有強制阻擋）
+
+    // 啟動時讀取站台模式
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        READ_ONLY = cfg.readOnly === true;
+      } catch {
+        READ_ONLY = false;
+      }
+    }
+
+    // 唯讀模式下隱藏靜態的寫入入口：新建專案表單、左側上傳區
+    function applyReadOnlyUI() {
+      const createForm = document.querySelector('.create-project-form');
+      const uploadSection = document.getElementById('upload-section');
+      if (createForm) createForm.classList.toggle('hidden', READ_ONLY);
+      if (uploadSection) uploadSection.classList.toggle('hidden', READ_ONLY);
+    }
 
     // ── DOM refs ──
     const viewProjects = document.getElementById('view-projects');
@@ -541,7 +561,11 @@
     }
 
     window.addEventListener('hashchange', route);
-    window.addEventListener('DOMContentLoaded', route);
+    window.addEventListener('DOMContentLoaded', async () => {
+      await loadConfig();
+      applyReadOnlyUI();
+      route();
+    });
 
     // ── View: Project list ──
     function showProjects() {
@@ -693,6 +717,13 @@
 
               const name = document.createElement('span');
               name.textContent = f;
+              el.appendChild(name);
+
+              // 唯讀模式不渲染搬移 / 刪除按鈕（後端另有 403 阻擋）
+              if (READ_ONLY) {
+                fileList.appendChild(el);
+                return;
+              }
 
               const moveBtn = document.createElement('button');
               moveBtn.className = 'move-btn';
@@ -743,7 +774,6 @@
                 }
               });
 
-              el.appendChild(name);
               el.appendChild(moveBtn);
               el.appendChild(delBtn);
               fileList.appendChild(el);
