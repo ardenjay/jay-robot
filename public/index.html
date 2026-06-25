@@ -829,7 +829,8 @@
       document.getElementById('upload-log').classList.remove('visible');
       document.getElementById('upload-log').textContent = '';
       const autoPhase = detectPhase(file.name);
-      if (autoPhase) document.getElementById('phase-select').value = autoPhase;
+      // 偵測到代碼就帶入，偵測不到就清空（不沿用上一個檔的殘留 phase）
+      document.getElementById('phase-select').value = autoPhase || '';
       checkUploadReady();
       setStatus('', '');
     }
