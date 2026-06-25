@@ -45,6 +45,40 @@ Open your browser at `http://localhost:3000`
 2. Type a question in the input box and press Enter
 3. The answer streams in real time with source sections listed below
 
+## Folder ingestion (pre-processed on your PC)
+
+For PDFs whose extracted **images** you want to keep, run MinerU on your PC,
+then copy the resulting folder (`*.md` + `images/`) to the server and ingest it
+via CLI — the server doesn't need MinerU for this path, and images are preserved.
+
+**Folder convention** — one folder = one `docId` (the folder name):
+
+```
+incoming/C560/            # folder name = docId "C560"
+  ├── overview.md         # one or more .md (all grouped under this docId)
+  ├── detail.md
+  └── images/             # shared image base
+      └── fig1.jpg
+```
+
+**Ingest:**
+
+```bash
+cd /data/extra/jay/jay-robot
+node scripts/ingest-folder.js incoming/C560 --project <projectId> --phase C5
+# --phase optional: inferred from an NPDS code in the folder name (C560 → C5);
+#   if the name has no code, --phase is required (it is never guessed).
+# omit the folder arg to ingest every subfolder under incoming/.
+```
+
+What it does: chunks every `.md` (chunk titles record their source md filename),
+rewrites relative image links `![](images/x.jpg)` → absolute
+`![](/documents/<projectId>/<docId>/images/x.jpg)`, and copies `images/` (and the
+md files) to `public/documents/<projectId>/<docId>/`. Re-ingesting the same docId
+replaces both chunks and the asset folder. Any folder name is accepted (NPDS
+naming is only a convenience). This CLI bypasses HTTP, so it works regardless of
+`READ_ONLY`.
+
 ## Project Structure
 
 ```
