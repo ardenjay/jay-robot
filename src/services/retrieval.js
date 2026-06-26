@@ -21,7 +21,8 @@ const SEARCH_DOCUMENTS_DECL = {
 function buildSystemInstruction(hasNet, uploadedCodes) {
   let s = '你是一個 NPDS 新產品開發系統的知識庫助手。\n'
     + '你可以使用工具查資料,務必根據工具結果回答,不要憑記憶或猜測。\n'
-    + '- 需要已上傳文件的內容時,呼叫 search_documents。\n';
+    + '- 需要已上傳文件的內容時,呼叫 search_documents。\n'
+    + '- 若檢索到的內容含有圖片(Markdown 圖片語法 ![](...),且為絕對路徑)且該圖有助於說明答案,你可以在答案中直接帶出該圖片連結;但「只能」使用檢索內容中既有的圖片連結,不可自行杜撰或猜測任何圖片路徑。\n';
   if (hasNet) {
     s += '- 凡涉及具體零件(refdes,如 U42)、net、腳位、或連線/追線的問題,你「必須」呼叫 netlist 工具'
       + '(netlist_part / netlist_net / netlist_pin / netlist_find / netlist_trace / netlist_info)查詢,不可憑記憶回答。\n'

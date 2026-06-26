@@ -4,6 +4,7 @@ const { marked } = require('marked');
 const llm = require('../adapters/llm');
 const vectorStore = require('../adapters/vector');
 const { extractNpdsCode } = require('../config/npds-catalog');
+const { rewriteImageLinks } = require('./imageLinks');
 
 const MAX_CHUNK_LENGTH = 1500;
 // 批次 embedding 每批筆數，降低 API 請求數與 429 風險
@@ -61,16 +62,6 @@ function splitLongChunk(text, title) {
 function phaseFromFolderName(name) {
   const code = extractNpdsCode(name);
   return code ? `C${code[1]}` : null;
-}
-
-// 把 md 內「相對」圖片連結 ![](images/x.jpg) 改寫成以 docId 為基底的絕對路徑。
-// 只改 images/ 開頭的相對連結；絕對路徑（/...）與外部 URL（http...）不動。
-function rewriteImageLinks(markdownText, projectId, docId) {
-  const base = `/documents/${projectId}/${docId}`;
-  return markdownText.replace(
-    /(!\[[^\]]*\]\()(images\/[^)\s]+)(\))/g,
-    (_, open, rel, close) => `${open}${base}/${rel}${close}`,
-  );
 }
 
 // 共用：把 rawChunks 批次 embedding 後，先清除該 docId 舊資料再寫入。回傳寫入筆數。

@@ -382,6 +382,19 @@
     .sources strong { color: #444; }
     .sources ul { padding-left: 16px; margin-top: 4px; }
     .sources li { margin-bottom: 2px; }
+    .source-link { cursor: pointer; }
+
+    /* 答案／檢視器內的圖片受限呈現，避免溢出版面 */
+    .bubble img, .doc-view img { max-width: 100%; height: auto; display: block; margin: 8px 0; border-radius: 6px; }
+
+    /* 來源檢視器 modal */
+    .doc-modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
+    .doc-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.4); }
+    .doc-modal-box { position: relative; background: #fff; width: min(860px, 92vw); max-height: 86vh; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+    .doc-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #eee; font-weight: 600; }
+    .doc-modal-head button { border: none; background: none; font-size: 1.4rem; cursor: pointer; color: #888; line-height: 1; }
+    .doc-modal-head button:hover { color: #dc2626; }
+    .doc-view { padding: 16px 20px; overflow-y: auto; }
 
     .tool-log { margin-bottom: 6px; }
     .tool-call {
@@ -515,6 +528,18 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- 來源檢視器 -->
+  <div id="doc-modal" class="doc-modal hidden">
+    <div class="doc-modal-backdrop" id="doc-modal-backdrop"></div>
+    <div class="doc-modal-box">
+      <div class="doc-modal-head">
+        <span id="doc-modal-title"></span>
+        <button id="doc-modal-close" title="關閉">×</button>
+      </div>
+      <div class="doc-view" id="doc-modal-body"></div>
+    </div>
   </div>
 
   <script src="/vendor/marked.min.js"></script>
@@ -1044,8 +1069,44 @@
         el.innerHTML = '<strong>來源：</strong>無相關文件';
         return;
       }
-      el.innerHTML = `<strong>來源：</strong><ul>${sources.map(s => `<li><a href="${escHtml(s.url)}" target="_blank" rel="noopener">${escHtml(s.docId)}</a></li>`).join('')}</ul>`;
+      el.innerHTML = `<strong>來源：</strong><ul>${sources.map(s =>
+        `<li><a href="#" class="source-link" data-docid="${escHtml(s.docId)}" data-url="${escHtml(s.url)}">${escHtml(s.docId)}</a></li>`
+      ).join('')}</ul>`;
+      el.querySelectorAll('.source-link').forEach(a => {
+        a.addEventListener('click', e => {
+          e.preventDefault();
+          openSource(a.dataset.docid, a.dataset.url);
+        });
+      });
     }
+
+    // 點來源 → 打 view 端點：markdown 型開檢視器渲染（含圖），file 型開原檔（fallback）
+    async function openSource(docId, fallbackUrl) {
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectId)}/documents/${encodeURIComponent(docId)}/view`);
+        if (!res.ok) throw new Error('view failed');
+        const data = await res.json();
+        if (data.type === 'markdown') {
+          openDocModal(docId, marked.parse(data.markdown));
+          return;
+        }
+        if (data.type === 'file') { window.open(data.url, '_blank', 'noopener'); return; }
+        throw new Error('unknown type');
+      } catch {
+        if (fallbackUrl) window.open(fallbackUrl, '_blank', 'noopener');
+      }
+    }
+
+    const docModal = document.getElementById('doc-modal');
+    function openDocModal(title, html) {
+      document.getElementById('doc-modal-title').textContent = title;
+      document.getElementById('doc-modal-body').innerHTML = html;
+      docModal.classList.remove('hidden');
+    }
+    function closeDocModal() { docModal.classList.add('hidden'); }
+    document.getElementById('doc-modal-close').addEventListener('click', closeDocModal);
+    document.getElementById('doc-modal-backdrop').addEventListener('click', closeDocModal);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !docModal.classList.contains('hidden')) closeDocModal(); });
 
     function escHtml(str) {
       return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

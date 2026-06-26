@@ -1,9 +1,13 @@
 const express = require('express');
 const crypto = require('crypto');
+const path = require('path');
 const vectorStore = require('../adapters/vector');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
+const { resolveDocView } = require('../services/docView');
 
 const router = express.Router();
+
+const DOCS_ROOT = path.join(process.cwd(), 'public', 'documents');
 
 router.post('/', blockWhenReadOnly, async (req, res) => {
   const { name } = req.body;
@@ -40,6 +44,13 @@ router.get('/:id/documents', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// 來源檢視：folder 進料的文件（持久化為目錄含 md+images）回 markdown 供前端渲染；
+// 只有原始檔的文件回 file url 由前端開原檔。GET 讀取路由，不受唯讀模式阻擋。
+router.get('/:id/documents/:docId/view', (req, res) => {
+  const { status, body } = resolveDocView(DOCS_ROOT, req.params.id, req.params.docId);
+  res.status(status).json(body);
 });
 
 router.delete('/:id/documents/:docId', blockWhenReadOnly, async (req, res) => {

@@ -124,4 +124,10 @@ describe('rewriteImageLinks', () => {
     assert.ok(out.includes('![b](http://e/y.png)'));
     assert.ok(out.includes('![c](/abs/z.png)'));
   });
+
+  it('docId 含空格 → 路徑 URL 編碼（避免破壞 markdown）', () => {
+    const out = rewriteImageLinks('![](images/fig1.jpg)', '100T', 'C204 MTi 600');
+    assert.ok(out.includes('![](/documents/100T/C204%20MTi%20600/images/fig1.jpg)'), out);
+    assert.ok(!/images\/fig1\.jpg\) /.test(out), '連結內不應殘留原始空格');
+  });
 });

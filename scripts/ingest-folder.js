@@ -10,6 +10,8 @@ const fs = require('fs');
 const path = require('path');
 const { parseArgs } = require('util');
 const { ingestFolder, phaseFromFolderName } = require('../src/services/ingestion');
+const { resolveProjectId } = require('../src/services/projectResolve');
+const vectorStore = require('../src/adapters/vector');
 
 const VALID_PHASES = new Set(['C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7']);
 
@@ -45,7 +47,12 @@ async function main() {
   });
 
   if (!values.project) die('--project 為必填');
-  const projectId = values.project;
+  // --project 可給 id 或名稱；解析成真正的 project id（系統以 id 為 key）
+  const projects = await vectorStore.listProjects();
+  const projectId = resolveProjectId(projects, values.project);
+  if (!projectId) {
+    die(`找不到專案 "${values.project}"。可用專案：${projects.map(p => `${p.name}`).join(', ') || '（無）'}`);
+  }
   const phaseArg = values.phase;
 
   let targets;
