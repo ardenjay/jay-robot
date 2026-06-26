@@ -205,6 +205,9 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    /* 點檔名即下載原始檔（讀取操作，唯讀模式也可用） */
+    .phase-file .file-name { cursor: pointer; }
+    .phase-file .file-name:hover { color: #4f46e5; text-decoration: underline; }
     .phase-file .del-btn {
       flex-shrink: 0;
       background: none;
@@ -740,8 +743,15 @@
               el.className = 'phase-file';
               el.title = f;
 
+              // 點檔名即下載原始檔（讀取操作，唯讀模式也可用）
               const name = document.createElement('span');
+              name.className = 'file-name';
               name.textContent = f;
+              name.title = '點擊下載原始檔';
+              name.addEventListener('click', e => {
+                e.stopPropagation();
+                window.location.href = `/api/projects/${encodeURIComponent(currentProjectId)}/documents/${encodeURIComponent(f)}/download`;
+              });
               el.appendChild(name);
 
               // 唯讀模式不渲染搬移 / 刪除按鈕（後端另有 403 阻擋）

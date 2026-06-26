@@ -114,25 +114,25 @@ function chunkFolderMarkdown(folderPath, projectId, docId) {
   return { rawChunks, mdCount: mdFiles.length };
 }
 
-// 把資料夾的 md 原檔與 images/ 複製到持久位置；重複進料整夾替換。回傳圖片數。
+// 驗證資料夾頂層恰好一個 PDF（folder 進料的原始檔），回傳該 PDF 檔名；0 或多於一個則丟錯。
+function requirePdf(folderPath) {
+  const pdfs = fs.readdirSync(folderPath).filter(f => f.toLowerCase().endsWith('.pdf'));
+  if (pdfs.length === 0) throw new Error(`資料夾需含一個 PDF 原始檔（供下載）：${folderPath}`);
+  if (pdfs.length > 1) throw new Error(`資料夾的 PDF 需恰好一個，找到 ${pdfs.length} 個：${folderPath}`);
+  return pdfs[0];
+}
+
+// 把整個資料夾原樣複製到持久位置（含 PDF、md、images）；重複進料整夾替換。回傳圖片數。
 function persistFolderAssets(folderPath, projectId, docId, docsRoot) {
   const dest = path.join(docsRoot, projectId, docId);
   fs.rmSync(dest, { recursive: true, force: true });
-  fs.mkdirSync(dest, { recursive: true });
-
-  for (const f of fs.readdirSync(folderPath)) {
-    if (f.toLowerCase().endsWith('.md')) {
-      fs.copyFileSync(path.join(folderPath, f), path.join(dest, f));
-    }
-  }
+  fs.cpSync(folderPath, dest, { recursive: true });
 
   const imagesSrc = path.join(folderPath, 'images');
-  let imageCount = 0;
   if (fs.existsSync(imagesSrc) && fs.statSync(imagesSrc).isDirectory()) {
-    fs.cpSync(imagesSrc, path.join(dest, 'images'), { recursive: true });
-    imageCount = fs.readdirSync(imagesSrc).filter(f => fs.statSync(path.join(imagesSrc, f)).isFile()).length;
+    return fs.readdirSync(imagesSrc).filter(f => fs.statSync(path.join(imagesSrc, f)).isFile()).length;
   }
-  return imageCount;
+  return 0;
 }
 
 // 資料夾進料路徑：一資料夾 = 一 docId（= 資料夾名），可多 md，共用 images/。
@@ -146,6 +146,7 @@ async function ingestFolder(folderPath, opts, llmAdapter, vectorAdapter) {
   const docId = opts.docId || path.basename(folder);
   const docsRoot = opts.docsRoot || path.join(process.cwd(), 'public', 'documents');
 
+  requirePdf(folder); // 進料前驗證：必含恰好一個 PDF 原始檔（供下載）
   const { rawChunks, mdCount } = chunkFolderMarkdown(folder, projectId, docId);
   const chunkCount = await embedAndStore(rawChunks, { docId, projectId, phase }, adapter, store);
   const imageCount = persistFolderAssets(folder, projectId, docId, docsRoot);

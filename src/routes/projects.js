@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const path = require('path');
 const vectorStore = require('../adapters/vector');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
-const { resolveDocView } = require('../services/docView');
+const { resolveDocView, resolveDownload } = require('../services/docView');
 
 const router = express.Router();
 
@@ -51,6 +51,13 @@ router.get('/:id/documents', async (req, res) => {
 router.get('/:id/documents/:docId/view', (req, res) => {
   const { status, body } = resolveDocView(DOCS_ROOT, req.params.id, req.params.docId);
   res.status(status).json(body);
+});
+
+// 下載原始檔（檔案型→該檔；目錄型→裡面的 PDF）。GET 讀取路由，唯讀模式可用。
+router.get('/:id/documents/:docId/download', (req, res) => {
+  const r = resolveDownload(DOCS_ROOT, req.params.id, req.params.docId);
+  if (!r) return res.status(404).json({ error: '找不到可下載的原始檔' });
+  res.download(r.filePath, r.filename);
 });
 
 router.delete('/:id/documents/:docId', blockWhenReadOnly, async (req, res) => {

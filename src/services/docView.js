@@ -28,4 +28,18 @@ function resolveDocView(docsRoot, projectId, docId) {
   };
 }
 
-module.exports = { resolveDocView };
+// 解析要下載的「原始檔」實體路徑。檔案型 docId → 該檔；目錄型 → 目錄內的 .pdf。
+// 回傳 { filePath, filename } 或 null（找不到 / 路徑穿越）。
+function resolveDownload(docsRoot, projectId, docId) {
+  const base = path.resolve(docsRoot, projectId);
+  const target = path.resolve(base, docId);
+  if (target !== base && !target.startsWith(base + path.sep)) return null;
+  if (!fs.existsSync(target)) return null;
+  if (fs.statSync(target).isDirectory()) {
+    const pdf = fs.readdirSync(target).find(f => f.toLowerCase().endsWith('.pdf'));
+    return pdf ? { filePath: path.join(target, pdf), filename: pdf } : null;
+  }
+  return { filePath: target, filename: docId };
+}
+
+module.exports = { resolveDocView, resolveDownload };

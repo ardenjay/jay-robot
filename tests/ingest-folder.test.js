@@ -18,14 +18,15 @@ function tmpDir() {
   return d;
 }
 
-// 建一個「mineru 風格」的來源資料夾：多 md + images/
-function makeSourceFolder(name, { withImages = true } = {}) {
+// 建一個「mineru 風格」的來源資料夾：原始 PDF + 多 md + images/
+function makeSourceFolder(name, { withImages = true, withPdf = true } = {}) {
   const root = tmpDir();
   const folder = path.join(root, name);
   fs.mkdirSync(folder);
   fs.writeFileSync(path.join(folder, 'overview.md'),
     `# 總覽\n\n這是總覽，含圖 ![圖一](images/fig1.jpg)。\n\n外部圖 ![x](http://e.com/a.png) 與絕對圖 ![y](/already/abs.png) 不該被改。`);
   fs.writeFileSync(path.join(folder, 'detail.md'), `# 細節\n\n細節內容。`);
+  if (withPdf) fs.writeFileSync(path.join(folder, 'source.pdf'), 'PDFDATA');
   if (withImages) {
     fs.mkdirSync(path.join(folder, 'images'));
     fs.writeFileSync(path.join(folder, 'images', 'fig1.jpg'), 'JPEGDATA');
@@ -102,6 +103,29 @@ describe('ingestFolder', () => {
     const r = await ingestFolder(folder, { projectId: 'p1', docsRoot, phase: 'C5' }, mockLLM, store);
     assert.equal(r.imageCount, 0);
     assert.ok(r.chunkCount >= 2);
+  });
+
+  it('原始 PDF 一併被持久化（供下載）', async () => {
+    const { docsRoot, folder, store } = setup('C560');
+    await ingestFolder(folder, { projectId: 'p1', docsRoot, phase: 'C5' }, mockLLM, store);
+    assert.ok(fs.existsSync(path.join(docsRoot, 'p1', 'C560', 'source.pdf')), 'PDF 應被複製到持久位置');
+  });
+
+  it('缺 PDF → 拒絕進料', async () => {
+    const { docsRoot, folder, store } = setup('C560', { withPdf: false });
+    await assert.rejects(
+      () => ingestFolder(folder, { projectId: 'p1', docsRoot, phase: 'C5' }, mockLLM, store),
+      /PDF/,
+    );
+  });
+
+  it('多於一個 PDF → 拒絕進料', async () => {
+    const { docsRoot, folder, store } = setup('C560');
+    fs.writeFileSync(path.join(folder, 'extra.pdf'), 'PDF2');
+    await assert.rejects(
+      () => ingestFolder(folder, { projectId: 'p1', docsRoot, phase: 'C5' }, mockLLM, store),
+      /恰好一個/,
+    );
   });
 });
 

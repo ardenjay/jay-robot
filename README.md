@@ -51,10 +51,12 @@ For PDFs whose extracted **images** you want to keep, run MinerU on your PC,
 then copy the resulting folder (`*.md` + `images/`) to the server and ingest it
 via CLI — the server doesn't need MinerU for this path, and images are preserved.
 
-**Folder convention** — one folder = one `docId` (the folder name):
+**Folder convention** — one folder = one `docId` (the folder name). The folder
+**must contain exactly one `.pdf`** (the original, kept for download):
 
 ```
 incoming/C560/            # folder name = docId "C560"
+  ├── C560.pdf            # the original PDF (required, exactly one) — for download
   ├── overview.md         # one or more .md (all grouped under this docId)
   ├── detail.md
   └── images/             # shared image base
@@ -71,13 +73,20 @@ node scripts/ingest-folder.js incoming/C560 --project <projectId> --phase C5
 # omit the folder arg to ingest every subfolder under incoming/.
 ```
 
-What it does: chunks every `.md` (chunk titles record their source md filename),
-rewrites relative image links `![](images/x.jpg)` → absolute
-`![](/documents/<projectId>/<docId>/images/x.jpg)`, and copies `images/` (and the
-md files) to `public/documents/<projectId>/<docId>/`. Re-ingesting the same docId
-replaces both chunks and the asset folder. Any folder name is accepted (NPDS
-naming is only a convenience). This CLI bypasses HTTP, so it works regardless of
-`READ_ONLY`.
+What it does: validates the folder has exactly one `.pdf` (rejects otherwise),
+chunks every `.md` (chunk titles record their source md filename), rewrites
+relative image links `![](images/x.jpg)` → absolute
+`![](/documents/<projectId>/<docId>/images/x.jpg)`, and copies the whole folder
+(PDF + md + images) to `public/documents/<projectId>/<docId>/`. Re-ingesting the
+same docId replaces both chunks and the asset folder. Any folder name is accepted
+(NPDS naming is only a convenience). This CLI bypasses HTTP, so it works
+regardless of `READ_ONLY`.
+
+**Download:** each file in the left document tree has a ⬇ button (shown even in
+read-only mode). It serves the original — the file itself for web uploads, or the
+`.pdf` inside the folder for folder-ingested docs — via
+`GET /api/projects/:id/documents/:docId/download`. Older folder docs ingested
+without a PDF return 404; re-ingest with the PDF added to fix.
 
 ## Project Structure
 
