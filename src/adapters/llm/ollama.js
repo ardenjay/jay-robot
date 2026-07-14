@@ -13,7 +13,9 @@ const DEFAULT_NUM_CTX = 16384;
 function toOllamaMessages(contents) {
   const messages = [];
   for (const c of contents || []) {
-    if (c.role === 'user') {
+    if (c.role === 'system') {
+      messages.push({ role: 'system', content: (c.parts || []).map(p => p.text || '').join('') });
+    } else if (c.role === 'user') {
       messages.push({ role: 'user', content: (c.parts || []).map(p => p.text || '').join('') });
     } else if (c.role === 'model') {
       const toolCalls = (c.parts || []).filter(p => p.functionCall).map(p => ({

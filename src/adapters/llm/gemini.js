@@ -77,13 +77,20 @@ class GeminiAdapter extends LLMAdapter {
   // 工具呼叫（function calling）：送出工具宣告，回傳 LLM 要求的 functionCalls 或最終文字。
   // 預設 AUTO 模式（由模型決定是否呼叫工具）。呼叫端負責多輪迴圈（回填 functionResponse 後再呼叫）。
   async chatWithTools(contents, tools) {
+    // system 元素（若有）走 Gemini 原生的 systemInstruction，不混入 contents——
+    // Gemini API 的 contents 不接受 system role。無 system 元素時行為不變。
+    const hasSystem = contents && contents[0] && contents[0].role === 'system';
+    const systemInstruction = hasSystem ? contents[0].parts.map(p => p.text || '').join('') : undefined;
+    const rest = hasSystem ? contents.slice(1) : contents;
+
     return withBackoff(async () => {
       const model = this.client.getGenerativeModel({
         model: GEN_MODEL,
         generationConfig: { temperature: GEN_TEMPERATURE },
         tools: tools && tools.length ? [{ functionDeclarations: tools }] : undefined,
+        systemInstruction,
       });
-      const result = await model.generateContent({ contents });
+      const result = await model.generateContent({ contents: rest });
       const resp = result.response;
       const calls = (typeof resp.functionCalls === 'function' ? resp.functionCalls() : null) || [];
       if (calls.length) {

@@ -64,6 +64,17 @@ describe('OllamaAdapter embedding', () => {
 });
 
 describe('Gemini↔Ollama 格式轉換', () => {
+  it('system role 對映為 system message（qwen3 template 原生支援）', () => {
+    const contents = [
+      { role: 'system', parts: [{ text: '你是助手' }] },
+      { role: 'user', parts: [{ text: '問題' }] },
+    ];
+    assert.deepEqual(toOllamaMessages(contents), [
+      { role: 'system', content: '你是助手' },
+      { role: 'user', content: '問題' },
+    ]);
+  });
+
   it('user／model+functionCall／function+functionResponse 三種 role 轉換正確', () => {
     const contents = [
       { role: 'user', parts: [{ text: '問題' }] },

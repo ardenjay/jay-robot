@@ -49,6 +49,27 @@ describe('GeminiAdapter.chatWithTools', () => {
     assert.equal(out.text, '最終答案');
   });
 
+  it('extracts a leading system element into systemInstruction, not into contents', async () => {
+    const capture = {};
+    const a = adapterWithStub({ functionCalls: () => [], text: () => 'ok' }, capture);
+    const contents = [
+      { role: 'system', parts: [{ text: '你是助手' }] },
+      { role: 'user', parts: [{ text: '問題' }] },
+    ];
+    await a.chatWithTools(contents, []);
+    assert.equal(capture.opts.systemInstruction, '你是助手');
+    assert.deepEqual(capture.contents, [{ role: 'user', parts: [{ text: '問題' }] }]);
+  });
+
+  it('leaves contents unchanged when there is no leading system element', async () => {
+    const capture = {};
+    const a = adapterWithStub({ functionCalls: () => [], text: () => 'ok' }, capture);
+    const contents = [{ role: 'user', parts: [{ text: 'hi' }] }];
+    await a.chatWithTools(contents, []);
+    assert.equal(capture.opts.systemInstruction, undefined);
+    assert.deepEqual(capture.contents, contents);
+  });
+
   it('supports a follow-up round after feeding tool results back', async () => {
     // 第二輪：contents 含 functionResponse，模型回最終文字
     const capture = {};

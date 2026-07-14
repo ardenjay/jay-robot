@@ -88,7 +88,12 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
 
   const tools = [SEARCH_DOCUMENTS_DECL, ...(hasNet ? netlist.NETLIST_TOOL_DECLARATIONS : [])];
   const sys = buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectContext });
-  const contents = [{ role: 'user', parts: [{ text: `${sys}\n\n## 使用者問題\n${question}` }] }];
+  // system 指令與使用者問題分開送：塞進同一個 user 訊息會被部分模型（如 qwen3）的
+  // chat template 弱化，模型會用文字宣告要查資料而不實際呼叫工具（實測 0/4 → 修正後 3/3）。
+  const contents = [
+    { role: 'system', parts: [{ text: sys }] },
+    { role: 'user', parts: [{ text: question }] },
+  ];
   const sources = new Map();
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {

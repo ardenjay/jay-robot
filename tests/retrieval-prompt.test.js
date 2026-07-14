@@ -40,6 +40,16 @@ async function capturedPrompt(project) {
 }
 
 describe('retrieval system prompt 注入專案名稱與背景', () => {
+  it('contents[0] 為 system 元素（含指令）、contents[1] 為僅含問題的 user 元素', async () => {
+    const capture = {};
+    const project = { id: 'p1', name: 'TESTPROJ', context: '' };
+    for await (const _ of answer('100T 有幾個 CAN', project.id, makeAdapter(capture), makeStore(project))) {}
+    assert.equal(capture.contents[0].role, 'system');
+    assert.ok(capture.contents[0].parts[0].text.includes('目前專案名稱'), 'system 元素應含完整指令');
+    assert.equal(capture.contents[1].role, 'user');
+    assert.equal(capture.contents[1].parts[0].text, '100T 有幾個 CAN', 'user 元素應只含問題，不與指令串接');
+  });
+
   it('專案名稱固定注入;context 為空時不含背景區塊', async () => {
     const sys = await capturedPrompt({ id: 'p1', name: 'TESTPROJ', context: '' });
     assert.ok(sys.includes('目前專案名稱:「TESTPROJ」'), sys.slice(0, 200));

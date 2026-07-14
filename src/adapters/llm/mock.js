@@ -1,6 +1,7 @@
 const LLMAdapter = require('./base');
 
-// 從第一個 user 訊息取出真正的問題（system instruction 後面接「## 使用者問題」）
+// 從第一個 user 訊息取出真正的問題。新格式下 user 訊息就是純問題；
+// 舊格式（system 指令與問題串在同一個 user 訊息）仍以「使用者問題」標記切割，向後相容。
 function extractQuestion(contents) {
   const first = (contents || []).find(c => c.role === 'user');
   const text = first ? first.parts.map(p => p.text || '').join('') : '';
