@@ -10,6 +10,11 @@ const adapters = {
     const MockAdapter = require('./mock');
     return new MockAdapter();
   },
+  // 本機 Ollama：生成與 embedding 都不出網。注意換 embedding provider 後舊向量不相容，需重新 ingest
+  ollama: () => {
+    const OllamaAdapter = require('./ollama');
+    return new OllamaAdapter();
+  },
 };
 
 if (!adapters[adapterName]) {

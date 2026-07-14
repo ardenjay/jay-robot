@@ -6,6 +6,8 @@ const VectorAdapter = require('./base');
 const DB_PATH = path.join(process.cwd(), 'data', 'rag.db');
 
 function cosineSimilarity(a, b) {
+  // 維度不符（如換了 embedding provider 沒重新 ingest）會算出無意義分數，直接視為不相似
+  if (a.length !== b.length) return null;
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
@@ -82,10 +84,16 @@ class SqliteVectorAdapter extends VectorAdapter {
 
     if (!rows.length) return [];
 
+    let dimMismatch = false;
     const scored = rows.map(row => {
       const emb = JSON.parse(row.embedding);
-      return { id: row.id, docId: row.doc_id, title: row.title, text: row.content, similarity: cosineSimilarity(vector, emb) };
+      const sim = cosineSimilarity(vector, emb);
+      if (sim === null) dimMismatch = true;
+      return { id: row.id, docId: row.doc_id, title: row.title, text: row.content, similarity: sim ?? 0 };
     });
+    if (dimMismatch) {
+      console.warn('[vector] embedding 維度不符（查詢向量與既有 chunks 來自不同 embedding 模型？），相關 chunks 視為不相似。請重新 ingest 文件。');
+    }
 
     scored.sort((a, b) => b.similarity - a.similarity);
     return scored.slice(0, topK).map(r => ({
