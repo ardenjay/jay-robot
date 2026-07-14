@@ -16,7 +16,7 @@ VectorAdapter SHALL 提供 `hybridSearch(queryText, vector, topK, projectId)`：
 - **THEN** 回傳結果與 `search(vector, topK, projectId)` 相同
 
 ### Requirement: SQLite adapter maintains a synchronized full-text index
-`SqliteVectorAdapter` SHALL 以 SQLite FTS5 建立全文索引（BM25 排名），索引內容為 CJK 逐字切分、英數 token 保留完整、lowercase 的前處理文字；查詢側 SHALL 套用相同前處理，且每個 token 以雙引號包裹、以 OR 串接（防 FTS 語法注入、避免 AND 過嚴零命中）。FTS 索引 SHALL 與 `chunks` 資料表同步：`add` 於同一交易寫入兩表、`clear` 同步刪除；初始化時若 FTS 表不存在或筆數與 `chunks` 不一致 SHALL 自動重建（backfill）。FTS5 不可用時 SHALL 降級為純向量模式而非啟動失敗。
+`SqliteVectorAdapter` SHALL 以 SQLite FTS5 建立全文索引（BM25 排名），索引內容為 CJK 逐字切分、英數 token 保留完整、lowercase 的前處理文字；查詢側 SHALL 套用相同前處理並以 OR 串接、token 雙引號包裹（防 FTS 語法注入、避免 AND 過嚴零命中）；連續 CJK 段 SHALL 組成相鄰字 bigram 片語（避免「的」等常見單字污染 BM25 排名），英數 token 維持完整。FTS 索引 SHALL 與 `chunks` 資料表同步：`add` 於同一交易寫入兩表、`clear` 同步刪除；初始化時若 FTS 表不存在或筆數與 `chunks` 不一致 SHALL 自動重建（backfill）。FTS5 不可用時 SHALL 降級為純向量模式而非啟動失敗。
 
 #### Scenario: Chunks are indexed on add and removed on clear
 - **WHEN** 呼叫 `add(chunks)` 後再呼叫 `clear(docId, projectId)`

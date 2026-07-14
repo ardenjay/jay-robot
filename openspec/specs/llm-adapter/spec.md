@@ -5,7 +5,7 @@ TBD — LLM Adapter capability for the markdown-rag-chatbot. Defines the interfa
 ## Requirements
 
 ### Requirement: LLMAdapter interface contract
-所有 LLMAdapter 實作 SHALL 繼承 base class 並實作下列方法：`embed(text)`、`embedBatch(texts)`、`generate(prompt)`、`stream(prompt)`，以及支援工具呼叫的 `chatWithTools(messages, tools)`——給定對話訊息與工具宣告，回傳 LLM 要求的工具呼叫（function calls）或最終文字；呼叫端可將工具執行結果回填為訊息後再次呼叫，形成多輪迴圈。
+所有 LLMAdapter 實作 SHALL 繼承 base class 並實作下列方法：`embed(text)`、`embedBatch(texts)`、`generate(prompt)`、`stream(prompt)`，以及支援工具呼叫的 `chatWithTools(messages, tools)`——給定對話訊息與工具宣告，回傳 LLM 要求的工具呼叫（function calls）或最終文字；呼叫端可將工具執行結果回填為訊息後再次呼叫，形成多輪迴圈。`messages` 首元素 MAY 為 `{role: 'system'}`，各實作 SHALL 將其對映到該 provider 的原生 system 通道，SHALL NOT 與使用者問題的 user 訊息串接。
 
 #### Scenario: Embed text
 - **WHEN** 呼叫 `embed(text)` 傳入字串
@@ -116,3 +116,18 @@ Ollama 無法連線（連線被拒／逾時）時，adapter SHALL 拋出含 base
 #### Scenario: Model not pulled
 - **WHEN** 指定模型不存在於 Ollama
 - **THEN** 拋出錯誤，訊息含 Ollama 的 error 與 `ollama pull` 提示
+
+### Requirement: System-role content maps to the provider-native system channel
+`chatWithTools(contents, tools)` 的 `contents` 首元素 MAY 為 `{role: 'system', parts: [{text}]}`。各 adapter SHALL 將其對映到該 provider 的原生 system 通道：`OllamaAdapter` → `{role: 'system', content}` message；`GeminiAdapter` → SDK 的 `systemInstruction` 參數（該元素不得混入 Gemini `contents`）；mock adapter → 以 user 元素全文為問題。contents 無 system 元素時，各 adapter SHALL 維持原行為（向後相容）。
+
+#### Scenario: Ollama maps system element to system message
+- **WHEN** contents 首元素為 system role，經 `OllamaAdapter.chatWithTools` 送出
+- **THEN** Ollama 請求的 messages[0] 為 `{role:'system', content:<指令>}`，問題在後續 user message
+
+#### Scenario: Gemini maps system element to systemInstruction
+- **WHEN** contents 首元素為 system role，經 `GeminiAdapter.chatWithTools` 送出
+- **THEN** 指令以 `systemInstruction` 傳給 SDK，送出的 `contents` 不含該元素
+
+#### Scenario: Contents without system element unchanged
+- **WHEN** contents 首元素為 user（舊格式）
+- **THEN** 各 adapter 行為與現行版本相同
