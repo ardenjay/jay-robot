@@ -47,10 +47,13 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
   return s;
 }
 
-// 文件檢索：embed 問題 → 取 top-K chunks，並把來源 docId 累積到 sources
+// 文件檢索：embed 問題 → hybrid search（向量 + 關鍵字融合）取 top-K chunks，
+// 並把來源 docId 累積到 sources。store 未提供 hybridSearch（舊注入物件）時退回純向量。
 async function runSearchDocuments(adapter, store, query, projectId, sources) {
   const queryVector = await adapter.embed(query);
-  const chunks = await store.search(queryVector, TOP_K, projectId);
+  const chunks = typeof store.hybridSearch === 'function'
+    ? await store.hybridSearch(query, queryVector, TOP_K, projectId)
+    : await store.search(queryVector, TOP_K, projectId);
   for (const c of chunks) {
     sources.set(c.docId, { docId: c.docId, url: `/documents/${projectId}/${encodeURIComponent(c.docId)}` });
   }

@@ -61,3 +61,50 @@ describe('retrieval system prompt 注入專案名稱與背景', () => {
     assert.ok(!sys.includes('專案背景(使用者提供)'));
   });
 });
+
+describe('search_documents 檢索路徑（hybrid / fallback）', () => {
+  // 第一輪要求 search_documents，第二輪收工，藉此觸發 runSearchDocuments
+  function makeToolAdapter() {
+    let round = 0;
+    return {
+      embed: async () => [0.1, 0.2],
+      chatWithTools: async () => {
+        round++;
+        if (round === 1) return { functionCalls: [{ name: 'search_documents', args: { query: '查 U42' } }], text: null };
+        return { functionCalls: [], text: 'ok' };
+      },
+    };
+  }
+
+  const baseStore = project => ({
+    listProjects: async () => [project],
+    listDocuments: async () => [],
+    isEmpty: () => false,
+  });
+
+  it('store 有 hybridSearch → 以原始查詢文字 + 向量呼叫，不走 search', async () => {
+    const calls = [];
+    const store = {
+      ...baseStore({ id: 'p1', name: 'P', context: '' }),
+      search: async () => { calls.push(['search']); return []; },
+      hybridSearch: async (queryText, vector, topK, projectId) => {
+        calls.push(['hybrid', queryText, vector, topK, projectId]);
+        return [];
+      },
+    };
+    for await (const _ of answer('U42 是什麼', 'p1', makeToolAdapter(), store)) {}
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], ['hybrid', '查 U42', [0.1, 0.2], 5, 'p1']);
+  });
+
+  it('store 無 hybridSearch（舊注入物件）→ fallback 用 search', async () => {
+    const calls = [];
+    const store = {
+      ...baseStore({ id: 'p1', name: 'P', context: '' }),
+      search: async (vector, topK, projectId) => { calls.push(['search', vector, topK, projectId]); return []; },
+    };
+    for await (const _ of answer('U42 是什麼', 'p1', makeToolAdapter(), store)) {}
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], ['search', [0.1, 0.2], 5, 'p1']);
+  });
+});
