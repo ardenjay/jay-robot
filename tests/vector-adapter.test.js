@@ -55,6 +55,35 @@ describe('vector adapter', () => {
     assert.equal(results.length, 0);
   });
 
+  it('舊版 projects 表（無 context 欄）→ 開啟時自動遷移且資料保留', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    // 直接以舊 schema 建 DB，模擬升級前的資料檔
+    const Database = require('better-sqlite3');
+    const old = new Database(dbPath);
+    old.exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)`);
+    old.prepare('INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)').run('p1', '100T', '2026-01-01');
+    old.close();
+
+    const adapter = new SqliteVectorAdapter(dbPath);
+    const projects = await adapter.listProjects();
+    assert.equal(projects.length, 1);
+    assert.equal(projects[0].name, '100T', '既有專案應保留');
+    assert.equal(projects[0].context, '', '遷移後 context 預設空字串');
+  });
+
+  it('updateProjectContext 後 listProjects 帶回新值；不存在的 id 回 false', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    const p = await adapter.createProject('p1', '100T');
+    assert.equal(p.context, '');
+
+    assert.equal(await adapter.updateProjectContext('p1', '100T = EAR-100T7'), true);
+    const projects = await adapter.listProjects();
+    assert.equal(projects[0].context, '100T = EAR-100T7');
+
+    assert.equal(await adapter.updateProjectContext('nope', 'x'), false);
+  });
+
   it('clear 再 add 同一 docId，search 只回傳新 chunks', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     const adapter = new SqliteVectorAdapter(dbPath);

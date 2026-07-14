@@ -308,6 +308,31 @@
     #upload-status.error   { background: #fee2e2; color: #991b1b; }
     #upload-status.info    { background: #eff6ff; color: #1d4ed8; }
 
+    /* ── Project settings（專案背景說明） ── */
+    #project-context-input {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      margin-top: 8px;
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    #project-context-input:focus { border-color: #4f46e5; }
+    .settings-hint { font-size: 0.78rem; color: #6b7280; }
+    #context-status {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+      border-radius: 5px;
+      margin-top: 6px;
+      min-height: 22px;
+    }
+    #context-status.success { background: #dcfce7; color: #166534; }
+    #context-status.error   { background: #fee2e2; color: #991b1b; }
+
     .vlm-toggle {
       display: flex;
       align-items: center;
@@ -514,6 +539,15 @@
           <div id="upload-status"></div>
           <div id="upload-log"></div>
         </div>
+
+        <div class="sidebar-section" id="project-settings-section">
+          <h2>專案設定</h2>
+          <span class="settings-hint">專案背景說明（會影響此專案的所有回答，例如說明專案代稱指的是什麼產品）</span>
+          <textarea id="project-context-input" rows="5" maxlength="4000"
+            placeholder="例：100T 指本專案的產品 EAR-100T7 邊緣運算 Box PC..."></textarea>
+          <button class="upload-btn" id="save-context-btn">儲存</button>
+          <div id="context-status"></div>
+        </div>
       </aside>
 
       <!-- Chat -->
@@ -563,12 +597,14 @@
       }
     }
 
-    // 唯讀模式下隱藏靜態的寫入入口：新建專案表單、左側上傳區
+    // 唯讀模式下隱藏靜態的寫入入口：新建專案表單、左側上傳區、專案設定
     function applyReadOnlyUI() {
       const createForm = document.querySelector('.create-project-form');
       const uploadSection = document.getElementById('upload-section');
+      const settingsSection = document.getElementById('project-settings-section');
       if (createForm) createForm.classList.toggle('hidden', READ_ONLY);
       if (uploadSection) uploadSection.classList.toggle('hidden', READ_ONLY);
+      if (settingsSection) settingsSection.classList.toggle('hidden', READ_ONLY);
     }
 
     // ── DOM refs ──
@@ -668,6 +704,30 @@
 
     backBtn.addEventListener('click', () => { location.hash = '#/'; });
 
+    // ── 專案設定：儲存背景說明 ──
+    document.getElementById('save-context-btn').addEventListener('click', async () => {
+      if (!currentProjectId) return;
+      const btn = document.getElementById('save-context-btn');
+      const status = document.getElementById('context-status');
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectId)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ context: document.getElementById('project-context-input').value }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        status.textContent = '✓ 已儲存';
+        status.className = 'success';
+      } catch (err) {
+        status.textContent = '儲存失敗：' + err.message;
+        status.className = 'error';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
     // ── View: Project detail ──
     // Task 8.4
     async function showDetail(projectId) {
@@ -676,13 +736,16 @@
       viewDetail.classList.remove('hidden');
       backBtn.style.display = 'inline-block';
 
-      // Load project name for header
+      // Load project name for header + 專案背景說明帶入設定欄
       try {
         const res = await fetch('/api/projects');
         const projects = await res.json();
         const p = projects.find(x => x.id === projectId);
         headerTitle.textContent = p ? `🤖 ${p.name}` : '🤖 Jay Robot';
+        document.getElementById('project-context-input').value = (p && p.context) || '';
       } catch {}
+      document.getElementById('context-status').textContent = '';
+      document.getElementById('context-status').className = '';
 
       // Reset chat
       document.getElementById('messages').innerHTML = `

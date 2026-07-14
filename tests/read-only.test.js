@@ -16,6 +16,7 @@ function buildApp() {
 
   app.post('/api/upload', blockWhenReadOnly, wrote);
   app.post('/api/projects', blockWhenReadOnly, wrote);
+  app.patch('/api/projects/:id', blockWhenReadOnly, wrote);
   app.delete('/api/projects/:id/documents/:docId', blockWhenReadOnly, wrote);
   app.patch('/api/projects/:id/documents/:docId/phase', blockWhenReadOnly, wrote);
 
@@ -46,6 +47,7 @@ after(() => {
 const WRITE_REQUESTS = [
   ['POST', '/api/upload'],
   ['POST', '/api/projects'],
+  ['PATCH', '/api/projects/p1'],
   ['DELETE', '/api/projects/p1/documents/d1'],
   ['PATCH', '/api/projects/p1/documents/d1/phase'],
 ];

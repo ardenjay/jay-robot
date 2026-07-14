@@ -18,9 +18,13 @@ const SEARCH_DOCUMENTS_DECL = {
   },
 };
 
-function buildSystemInstruction(hasNet, uploadedCodes) {
-  let s = '你是一個 NPDS 新產品開發系統的知識庫助手。\n'
-    + '你可以使用工具查資料,務必根據工具結果回答,不要憑記憶或猜測。\n'
+function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectContext } = {}) {
+  let s = '你是一個 NPDS 新產品開發系統的知識庫助手。\n';
+  // 專案名稱固定注入：讓模型知道「100T」這類代稱指的是專案本身，而非某顆零件
+  if (projectName) {
+    s += `目前專案名稱:「${projectName}」。使用者提到這個名稱時,通常指本專案(產品)本身,而非某個零件。\n`;
+  }
+  s += '你可以使用工具查資料,務必根據工具結果回答,不要憑記憶或猜測。\n'
     + '- 需要已上傳文件的內容時,呼叫 search_documents。\n'
     + '- 若檢索到的內容含有圖片(Markdown 圖片語法 ![](...),且為絕對路徑)且該圖有助於說明答案,你可以在答案中直接帶出該圖片連結;但「只能」使用檢索內容中既有的圖片連結,不可自行杜撰或猜測任何圖片路徑。\n';
   if (hasNet) {
@@ -34,8 +38,12 @@ function buildSystemInstruction(hasNet, uploadedCodes) {
   }
   s += `\n針對「文件內容類」問題,若 search_documents 的結果不足以回答,才說「${NO_ANSWER_PHRASE}」,`
     + '並根據下方 NPDS 文件目錄建議使用者上傳 1–3 份最相關的文件(含代碼、名稱、所屬階段)。'
-    + '此「建議上傳文件」僅適用於文件內容類問題,不適用於線路/連線類問題。\n\n'
-    + `## NPDS 文件目錄(參考,供建議上傳用)\n${formatCatalogForPrompt(uploadedCodes)}`;
+    + '此「建議上傳文件」僅適用於文件內容類問題,不適用於線路/連線類問題。\n';
+  // 使用者提供的專案背景：解讀專案代稱/縮寫時優先參考
+  if (projectContext && projectContext.trim()) {
+    s += `\n## 專案背景(使用者提供)\n${projectContext.trim()}\n`;
+  }
+  s += `\n## NPDS 文件目錄(參考,供建議上傳用)\n${formatCatalogForPrompt(uploadedCodes)}`;
   return s;
 }
 
@@ -54,12 +62,14 @@ async function runSearchDocuments(adapter, store, query, projectId, sources) {
 
 // 以 LLM 工具呼叫迴圈回答問題。adapter / store 可注入(預設用模組 singleton)。
 async function* answer(question, projectId, adapter = llm, store = vectorStore) {
-  // 解析專案名稱（netlist 依專案名對資料夾）
+  // 解析專案名稱與背景（netlist 依專案名對資料夾；名稱與背景也注入 system prompt）
   let projectName;
+  let projectContext;
   if (store.listProjects) {
     const projects = await store.listProjects();
     const p = projects.find(x => x.id === projectId);
     projectName = p && p.name;
+    projectContext = p && p.context;
   }
   const hasNet = netlist.hasNetlist(projectName);
   const hasDocs = !(store.isEmpty && store.isEmpty(projectId));
@@ -74,7 +84,7 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
   const uploadedCodes = new Set(uploadedDocs.map(d => extractNpdsCode(d.docId)).filter(Boolean));
 
   const tools = [SEARCH_DOCUMENTS_DECL, ...(hasNet ? netlist.NETLIST_TOOL_DECLARATIONS : [])];
-  const sys = buildSystemInstruction(hasNet, uploadedCodes);
+  const sys = buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectContext });
   const contents = [{ role: 'user', parts: [{ text: `${sys}\n\n## 使用者問題\n${question}` }] }];
   const sources = new Map();
 

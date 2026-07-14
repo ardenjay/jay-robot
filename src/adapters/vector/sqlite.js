@@ -31,7 +31,8 @@ class SqliteVectorAdapter extends VectorAdapter {
       CREATE TABLE IF NOT EXISTS projects (
         id         TEXT PRIMARY KEY,
         name       TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        context    TEXT NOT NULL DEFAULT ''
       );
     `);
     this.db.exec(`
@@ -48,6 +49,7 @@ class SqliteVectorAdapter extends VectorAdapter {
     // 對舊版（缺欄位）的 DB 檔做相容遷移；欄位已存在時 SQLite 會報錯，忽略即可
     try { this.db.exec(`ALTER TABLE chunks ADD COLUMN project_id TEXT DEFAULT 'default'`); } catch {}
     try { this.db.exec(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
+    try { this.db.exec(`ALTER TABLE projects ADD COLUMN context TEXT NOT NULL DEFAULT ''`); } catch {}
 
     // 維持與舊介面相容：呼叫端仍可 `await store._ready`
     this._ready = Promise.resolve();
@@ -125,11 +127,17 @@ class SqliteVectorAdapter extends VectorAdapter {
   async createProject(id, name) {
     const created_at = new Date().toISOString();
     this.db.prepare('INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)').run(id, name, created_at);
-    return { id, name, created_at };
+    return { id, name, created_at, context: '' };
   }
 
   async listProjects() {
-    return this.db.prepare('SELECT id, name, created_at FROM projects ORDER BY created_at DESC').all();
+    return this.db.prepare('SELECT id, name, created_at, context FROM projects ORDER BY created_at DESC').all();
+  }
+
+  // 專案背景說明（使用者提供，回答時注入 system prompt）
+  async updateProjectContext(id, context) {
+    const r = this.db.prepare('UPDATE projects SET context = ? WHERE id = ?').run(context, id);
+    return r.changes > 0;
   }
 }
 

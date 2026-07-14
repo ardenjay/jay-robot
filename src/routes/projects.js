@@ -23,6 +23,25 @@ router.post('/', blockWhenReadOnly, async (req, res) => {
   }
 });
 
+// 更新專案背景說明（回答時注入 system prompt）
+const MAX_CONTEXT_LEN = 4000;
+router.patch('/:id', blockWhenReadOnly, async (req, res) => {
+  const { context } = req.body;
+  if (typeof context !== 'string') {
+    return res.status(400).json({ error: 'context 必須為字串' });
+  }
+  if (context.length > MAX_CONTEXT_LEN) {
+    return res.status(400).json({ error: `context 長度上限 ${MAX_CONTEXT_LEN} 字` });
+  }
+  try {
+    const ok = await vectorStore.updateProjectContext(req.params.id, context);
+    if (!ok) return res.status(404).json({ error: '找不到專案' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const projects = await vectorStore.listProjects();
