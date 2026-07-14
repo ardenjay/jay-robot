@@ -435,6 +435,20 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
 
+    /* 生成中指示：等待 LLM 期間泡泡內的跳動點 + 階段文字 */
+    .generating { display: flex; align-items: center; gap: 8px; color: #6b7280; font-size: 0.85rem; }
+    .generating .dots { display: inline-flex; gap: 3px; }
+    .generating .dots i {
+      width: 6px; height: 6px; border-radius: 50%; background: #9ca3af;
+      animation: gen-bounce 1s infinite ease-in-out;
+    }
+    .generating .dots i:nth-child(2) { animation-delay: 0.15s; }
+    .generating .dots i:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes gen-bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+      40% { transform: translateY(-4px); opacity: 1; }
+    }
+
     .input-row {
       padding: 16px 24px;
       background: #fff;
@@ -1047,7 +1061,7 @@
       sendBtn.disabled = true;
 
       appendMessage('user', question);
-      const { bubble, sourcesEl, toolsEl } = appendAssistantBubble();
+      const { bubble, sourcesEl, toolsEl, setStage, removeIndicator } = appendAssistantBubble();
       let answerMd = '';  // 累積原始 Markdown，逐 token 重新渲染
 
       currentController = new AbortController();
@@ -1080,10 +1094,12 @@
             try {
               const event = JSON.parse(raw);
               if (event.type === 'token') {
+                removeIndicator();
                 answerMd += event.value;
                 bubble.innerHTML = marked.parse(answerMd);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
               } else if (event.type === 'tool') {
+                setStage(`查詢中：${toolLabel(event.name)}`, '整理答案中…');
                 const line = document.createElement('div');
                 line.className = 'tool-call';
                 const argStr = event.args && Object.keys(event.args).length ? JSON.stringify(event.args) : '';
@@ -1093,6 +1109,7 @@
               } else if (event.type === 'sources') {
                 renderSources(sourcesEl, event.value);
               } else if (event.type === 'error') {
+                removeIndicator();
                 bubble.textContent = event.value;
               }
             } catch {}
@@ -1101,6 +1118,7 @@
       } catch (err) {
         if (err.name !== 'AbortError') bubble.textContent = `錯誤：${err.message}`;
       } finally {
+        removeIndicator(); // 兜底：[DONE] 無 token、連線中斷、abort 都不留動畫殘影
         currentController = null;
         questionInput.disabled = false;
         sendBtn.disabled = false;
@@ -1120,6 +1138,13 @@
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    // 工具名 → 人話（生成中指示的階段文字用）
+    function toolLabel(name) {
+      if (name === 'search_documents') return '搜尋文件';
+      if (name && name.startsWith('netlist_')) return '查電路';
+      return name || '';
+    }
+
     function appendAssistantBubble() {
       const msg = document.createElement('div');
       msg.className = 'message assistant';
@@ -1129,12 +1154,31 @@
       bubble.className = 'bubble';
       const sourcesEl = document.createElement('div');
       sourcesEl.className = 'sources';
+
+      // 生成中指示：建泡泡時就顯示，首個 token／錯誤／串流結束時移除
+      const indicator = document.createElement('div');
+      indicator.className = 'generating';
+      indicator.innerHTML = '<span class="dots"><i></i><i></i><i></i></span><span class="stage">思考中…</span>';
+      bubble.appendChild(indicator);
+      let stageTimer = null;
+      function setStage(text, thenText) {
+        const el = indicator.querySelector('.stage');
+        if (el) el.textContent = text;
+        if (stageTimer) { clearTimeout(stageTimer); stageTimer = null; }
+        // 工具本身毫秒級就跑完，之後的等待是下一輪 LLM 推理——短暫顯示工具名後切回生成狀態
+        if (thenText) stageTimer = setTimeout(() => setStage(thenText), 1500);
+      }
+      function removeIndicator() {
+        if (stageTimer) { clearTimeout(stageTimer); stageTimer = null; }
+        indicator.remove();
+      }
+
       msg.appendChild(toolsEl);
       msg.appendChild(bubble);
       msg.appendChild(sourcesEl);
       messagesEl.appendChild(msg);
       messagesEl.scrollTop = messagesEl.scrollHeight;
-      return { bubble, sourcesEl, toolsEl };
+      return { bubble, sourcesEl, toolsEl, setStage, removeIndicator };
     }
 
     function renderSources(el, sources) {
