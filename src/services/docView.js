@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { rewriteImageLinks } = require('./imageLinks');
+const { rewriteImageLinks, buildFileIndex } = require('./imageLinks');
 
 // 解析來源檢視內容（純函式，不碰 DB）。回傳 { status, body }。
 // 目錄（folder 進料：md+images）→ markdown；單一原始檔（如 web 上傳的 pdf）→ file url；不存在 → 404。
@@ -16,9 +16,11 @@ function resolveDocView(docsRoot, projectId, docId) {
   }
   if (fs.statSync(target).isDirectory()) {
     const mdFiles = fs.readdirSync(target).filter(f => f.toLowerCase().endsWith('.md')).sort();
-    // 持久化的 md 原檔內仍是相對圖連結；回傳前改寫成絕對路徑（與 chunk 一致），讓檢視器顯示得出圖。
+    // 持久化的 md 原檔內仍是相對圖連結／Obsidian wiki-link；回傳前以持久化資料夾的檔案索引
+    // 改寫成絕對路徑（與 chunk 一致），讓檢視器顯示得出圖。
+    const fileIndex = buildFileIndex(target);
     const markdown = mdFiles
-      .map(f => rewriteImageLinks(fs.readFileSync(path.join(target, f), 'utf-8'), projectId, docId))
+      .map(f => rewriteImageLinks(fs.readFileSync(path.join(target, f), 'utf-8'), projectId, docId, fileIndex))
       .join('\n\n');
     return { status: 200, body: { type: 'markdown', markdown } };
   }

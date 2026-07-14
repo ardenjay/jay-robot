@@ -28,6 +28,19 @@ describe('resolveDocView', () => {
     assert.ok(!body.markdown.includes('](images/fig1.jpg)'), '不應殘留相對連結');
   });
 
+  it('Obsidian wiki-link → 以持久化資料夾的實際位置解析（舊資料不重灌也能看圖）', () => {
+    const root = newRoot();
+    const dir = path.join(root, 'p1', 'C208'); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'note.md'), '![[Thor CB Fig1-1 Block Diagram.jpg]]');
+    fs.mkdirSync(path.join(dir, 'Thor Carrier Board'));
+    fs.writeFileSync(path.join(dir, 'Thor Carrier Board', 'Thor CB Fig1-1 Block Diagram.jpg'), 'JPG');
+
+    const { status, body } = resolveDocView(root, 'p1', 'C208');
+    assert.equal(status, 200);
+    assert.ok(body.markdown.includes('![](/documents/p1/C208/Thor%20Carrier%20Board/Thor%20CB%20Fig1-1%20Block%20Diagram.jpg)'), body.markdown);
+    assert.ok(!body.markdown.includes('![['), '不應殘留 wiki-link');
+  });
+
   it('檔案型 docId（web 原始檔）→ 回 file + url', () => {
     const root = newRoot();
     fs.mkdirSync(path.join(root, 'p1'), { recursive: true });

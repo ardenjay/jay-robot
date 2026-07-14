@@ -4,7 +4,7 @@ const { marked } = require('marked');
 const llm = require('../adapters/llm');
 const vectorStore = require('../adapters/vector');
 const { extractNpdsCode } = require('../config/npds-catalog');
-const { rewriteImageLinks } = require('./imageLinks');
+const { rewriteImageLinks, buildFileIndex } = require('./imageLinks');
 
 const MAX_CHUNK_LENGTH = 1500;
 // 批次 embedding 每批筆數，降低 API 請求數與 429 風險
@@ -102,9 +102,10 @@ function chunkFolderMarkdown(folderPath, projectId, docId) {
   if (mdFiles.length === 0) {
     throw new Error(`資料夾內找不到任何 .md：${folderPath}`);
   }
+  const fileIndex = buildFileIndex(folderPath); // 供 Obsidian wiki-link 解析實際子路徑
   const rawChunks = [];
   for (const mdName of mdFiles) {
-    const text = rewriteImageLinks(fs.readFileSync(path.join(folderPath, mdName), 'utf-8'), projectId, docId);
+    const text = rewriteImageLinks(fs.readFileSync(path.join(folderPath, mdName), 'utf-8'), projectId, docId, fileIndex);
     for (const c of parseAndChunk(text, mdName)) {
       // 來源 md 檔名記進 title，多 md 時可追溯（無標題的塊 title 已是 mdName，不重複加）
       const title = c.title === mdName ? mdName : `${mdName} › ${c.title}`;

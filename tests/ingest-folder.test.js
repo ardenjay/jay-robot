@@ -7,6 +7,7 @@ const path = require('path');
 const Database = require('better-sqlite3');
 const SqliteVectorAdapter = require('../src/adapters/vector/sqlite');
 const { ingestFolder, phaseFromFolderName, rewriteImageLinks } = require('../src/services/ingestion');
+const { buildFileIndex } = require('../src/services/imageLinks');
 
 const mockLLM = {
   async embed() { return new Array(3072).fill(0); },
@@ -127,6 +128,48 @@ describe('ingestFolder', () => {
       /恰好一個/,
     );
   });
+
+  it('Obsidian 風格資料夾（wiki-link + 筆記同名附件夾）→ chunk 內為標準絕對連結', async () => {
+    const dbPath = path.join(tmpDir(), 'rag.db'); cleanup.push(path.dirname(dbPath));
+    const docsRoot = tmpDir(); cleanup.push(docsRoot);
+    const root = tmpDir(); cleanup.push(root);
+    const folder = path.join(root, 'C208'); fs.mkdirSync(folder);
+    fs.writeFileSync(path.join(folder, 'spec.pdf'), 'PDF');
+    fs.writeFileSync(path.join(folder, 'Thor Carrier Board.md'),
+      '# 方塊圖\n\n![[Thor CB Fig1-1 Block Diagram.jpg]]\n\n說明文字。');
+    fs.mkdirSync(path.join(folder, 'Thor Carrier Board'));
+    fs.writeFileSync(path.join(folder, 'Thor Carrier Board', 'Thor CB Fig1-1 Block Diagram.jpg'), 'JPG');
+
+    const store = new SqliteVectorAdapter(dbPath);
+    await ingestFolder(folder, { projectId: 'p1', docsRoot, phase: 'C2' }, mockLLM, store);
+
+    const Database = require('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true });
+    const all = db.prepare('SELECT content FROM chunks').all().map(r => r.content).join('\n');
+    db.close();
+    assert.ok(all.includes('![](/documents/p1/C208/Thor%20Carrier%20Board/Thor%20CB%20Fig1-1%20Block%20Diagram.jpg)'), all);
+    assert.ok(!all.includes('![['), 'chunk 不應殘留 wiki-link');
+  });
+});
+
+describe('buildFileIndex', () => {
+  const cleanup = [];
+  afterEach(() => { for (const p of cleanup.splice(0)) { try { fs.rmSync(p, { recursive: true, force: true }); } catch {} } });
+
+  it('遞迴子資料夾、略過 md、同名取第一', () => {
+    const root = tmpDir(); cleanup.push(root);
+    fs.writeFileSync(path.join(root, 'note.md'), '# x');
+    fs.writeFileSync(path.join(root, 'top.pdf'), 'PDF');
+    fs.mkdirSync(path.join(root, 'a sub'));
+    fs.writeFileSync(path.join(root, 'a sub', 'fig.jpg'), '1');
+    fs.mkdirSync(path.join(root, 'z sub'));
+    fs.writeFileSync(path.join(root, 'z sub', 'fig.jpg'), '2');
+
+    const idx = buildFileIndex(root);
+    assert.equal(idx.get('top.pdf'), 'top.pdf');
+    assert.equal(idx.get('fig.jpg'), 'a sub/fig.jpg', '同名檔取排序後第一個');
+    assert.ok(!idx.has('note.md'), '略過 md');
+  });
 });
 
 describe('phaseFromFolderName', () => {
@@ -153,5 +196,31 @@ describe('rewriteImageLinks', () => {
     const out = rewriteImageLinks('![](images/fig1.jpg)', '100T', 'C204 MTi 600');
     assert.ok(out.includes('![](/documents/100T/C204%20MTi%20600/images/fig1.jpg)'), out);
     assert.ok(!/images\/fig1\.jpg\) /.test(out), '連結內不應殘留原始空格');
+  });
+
+  it('Obsidian wiki-link → 以 fileIndex 解析子路徑並逐段編碼', () => {
+    const idx = new Map([['Thor CB Fig1-1 Block Diagram.jpg', 'Thor Carrier Board/Thor CB Fig1-1 Block Diagram.jpg']]);
+    const out = rewriteImageLinks('前文 ![[Thor CB Fig1-1 Block Diagram.jpg]] 後文', 'p1', 'C208', idx);
+    assert.ok(out.includes('![](/documents/p1/C208/Thor%20Carrier%20Board/Thor%20CB%20Fig1-1%20Block%20Diagram.jpg)'), out);
+    assert.ok(!out.includes('![['), '不應殘留 wiki-link');
+  });
+
+  it('wiki-link 含 |alt → alt 保留、路徑正確', () => {
+    const idx = new Map([['fig.jpg', 'attach/fig.jpg']]);
+    const out = rewriteImageLinks('![[fig.jpg|方塊圖]]', 'p1', 'D1', idx);
+    assert.equal(out, '![方塊圖](/documents/p1/D1/attach/fig.jpg)');
+  });
+
+  it('wiki-link 未命中 / 未傳 fileIndex → 保留原樣不杜撰', () => {
+    const idx = new Map();
+    assert.equal(rewriteImageLinks('![[missing.jpg]]', 'p1', 'D1', idx), '![[missing.jpg]]');
+    assert.equal(rewriteImageLinks('![[any.jpg]]', 'p1', 'D1'), '![[any.jpg]]');
+  });
+
+  it('標準語法與 wiki-link 混用 → 各自改寫互不影響', () => {
+    const idx = new Map([['b.jpg', 'sub/b.jpg']]);
+    const out = rewriteImageLinks('![](images/a.jpg) 與 ![[b.jpg]]', 'p1', 'D1', idx);
+    assert.ok(out.includes('![](/documents/p1/D1/images/a.jpg)'));
+    assert.ok(out.includes('![](/documents/p1/D1/sub/b.jpg)'));
   });
 });
