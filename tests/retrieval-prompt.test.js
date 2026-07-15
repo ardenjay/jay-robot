@@ -225,7 +225,7 @@ describe('search_documents 檢索路徑（hybrid / fallback）', () => {
     };
     for await (const _ of answer('U42 是什麼', 'p1', makeToolAdapter(), store)) {}
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], ['hybrid', '查 U42', [0.1, 0.2], 5, 'p1']);
+    assert.deepEqual(calls[0], ['hybrid', '查 U42', [0.1, 0.2], 15, 'p1'], 'rerank 池應大於 TOP_K');
   });
 
   it('store 無 hybridSearch（舊注入物件）→ fallback 用 search', async () => {
@@ -236,6 +236,6 @@ describe('search_documents 檢索路徑（hybrid / fallback）', () => {
     };
     for await (const _ of answer('U42 是什麼', 'p1', makeToolAdapter(), store)) {}
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0], ['search', [0.1, 0.2], 5, 'p1']);
+    assert.deepEqual(calls[0], ['search', [0.1, 0.2], 15, 'p1'], 'rerank 池應大於 TOP_K');
   });
 });

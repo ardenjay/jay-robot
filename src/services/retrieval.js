@@ -2,8 +2,13 @@ const llm = require('../adapters/llm');
 const vectorStore = require('../adapters/vector');
 const { formatCatalogForPrompt, extractNpdsCode } = require('../config/npds-catalog');
 const netlist = require('./netlist');
+const { rerankChunks } = require('./rerank');
 
 const TOP_K = 5;
+// hybridSearch/search 先取比 TOP_K 更寬的候選池，再交給 LLM rerank 篩到 TOP_K：
+// 候選池太窄時，跨語言/跨文件關鍵字不匹配的正確片段可能連候選都排不進去（見
+// fts5-hybrid-search-gotchas 記憶），先擴大候選池才有機會被 rerank 選中。
+const RERANK_POOL_K = 15;
 const MAX_TOOL_ROUNDS = 6;
 const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
 
@@ -66,9 +71,10 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
 // 把背景塞進工具結果它才會用。
 async function runSearchDocuments(adapter, store, query, projectId, sources, projectContext) {
   const queryVector = await adapter.embed(query);
-  const chunks = typeof store.hybridSearch === 'function'
-    ? await store.hybridSearch(query, queryVector, TOP_K, projectId)
-    : await store.search(queryVector, TOP_K, projectId);
+  const pool = typeof store.hybridSearch === 'function'
+    ? await store.hybridSearch(query, queryVector, RERANK_POOL_K, projectId)
+    : await store.search(queryVector, RERANK_POOL_K, projectId);
+  const chunks = await rerankChunks(adapter, query, pool, TOP_K);
   for (const c of chunks) {
     sources.set(c.docId, { docId: c.docId, url: `/documents/${projectId}/${encodeURIComponent(c.docId)}` });
   }
