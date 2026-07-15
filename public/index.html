@@ -236,6 +236,20 @@
     }
     .phase-file:hover .move-btn { visibility: visible; }
     .phase-file .move-btn:hover { color: #4f46e5; background: #eef2ff; }
+    .phase-file .rename-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 0.75rem;
+      padding: 0 2px;
+      border-radius: 3px;
+      line-height: 1;
+      visibility: hidden;
+    }
+    .phase-file:hover .rename-btn { visibility: visible; }
+    .phase-file .rename-btn:hover { color: #059669; background: #d1fae5; }
     .phase-file .move-select {
       font-size: 0.75rem;
       border: 1px solid #4f46e5;
@@ -898,6 +912,28 @@
                 sel.focus();
               });
 
+              const renameBtn = document.createElement('button');
+              renameBtn.className = 'rename-btn';
+              renameBtn.textContent = '✎';
+              renameBtn.title = '改名（檔名參與檢索，取名帶關鍵字有助命中）';
+              renameBtn.addEventListener('click', async e => {
+                e.stopPropagation();
+                const newDocId = prompt('新名稱（含副檔名；不可含 / \\ ..）:', f);
+                if (newDocId === null) return;
+                try {
+                  const res = await fetch(`/api/projects/${currentProjectId}/documents/${encodeURIComponent(f)}/rename`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ newDocId }),
+                  });
+                  const body = await res.json();
+                  if (!res.ok) { alert(body.error || `HTTP ${res.status}`); return; }
+                  loadDocTree();
+                } catch (err) {
+                  alert(`改名失敗：${err.message}`);
+                }
+              });
+
               const delBtn = document.createElement('button');
               delBtn.className = 'del-btn';
               delBtn.textContent = '×';
@@ -914,6 +950,7 @@
               });
 
               el.appendChild(moveBtn);
+              el.appendChild(renameBtn);
               el.appendChild(delBtn);
               fileList.appendChild(el);
             });

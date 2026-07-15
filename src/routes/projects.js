@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const vectorStore = require('../adapters/vector');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
@@ -83,6 +84,47 @@ router.delete('/:id/documents/:docId', blockWhenReadOnly, async (req, res) => {
   try {
     await vectorStore.clear(req.params.docId, req.params.id);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 文件改名：DB（chunks + FTS）先行，成功後搬持久化檔案/資料夾。
+// 含自癒路徑：前次改名 DB 成功但磁碟搬移失敗 → 重試同一改名時只補搬移。
+router.patch('/:id/documents/:docId/rename', blockWhenReadOnly, async (req, res) => {
+  const projectId = req.params.id;
+  const oldDocId = req.params.docId;
+  const newDocId = (req.body.newDocId || '').trim();
+
+  if (!newDocId || /[\\/]/.test(newDocId) || newDocId.includes('..')) {
+    return res.status(400).json({ error: 'newDocId 不可為空,且不可含 /、\\ 或 ..' });
+  }
+  if (newDocId === oldDocId) return res.json({ ok: true, renamed: 0 });
+
+  try {
+    const docs = await vectorStore.listDocuments(projectId);
+    const hasOld = docs.some(d => d.docId === oldDocId);
+    const hasNew = docs.some(d => d.docId === newDocId);
+    const oldPath = path.join(DOCS_ROOT, projectId, oldDocId);
+    const newPath = path.join(DOCS_ROOT, projectId, newDocId);
+
+    // 自癒：DB 已是新名、磁碟還在舊名 → 只補搬移
+    if (hasNew && !hasOld && fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      fs.renameSync(oldPath, newPath);
+      return res.json({ ok: true, healed: true });
+    }
+    if (hasNew) return res.status(409).json({ error: `「${newDocId}」已存在` });
+    if (!hasOld) return res.status(404).json({ error: '找不到文件' });
+    if (fs.existsSync(newPath)) return res.status(409).json({ error: `持久化路徑「${newDocId}」已被占用` });
+
+    const renamed = await vectorStore.renameDocument(projectId, oldDocId, newDocId);
+    try {
+      if (fs.existsSync(oldPath)) fs.renameSync(oldPath, newPath);
+      else console.log(`[rename] 無持久化來源,僅更新 DB:${oldDocId}`);
+    } catch (fsErr) {
+      return res.status(500).json({ error: `DB 已改名,持久化搬移失敗(${fsErr.message});請以相同名稱重試以補搬移` });
+    }
+    res.json({ ok: true, renamed });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

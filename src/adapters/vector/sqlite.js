@@ -260,6 +260,27 @@ class SqliteVectorAdapter extends VectorAdapter {
     clearBoth();
   }
 
+  // 文件改名：chunks 的 doc_id 與該文件 FTS 索引列同一交易更新。
+  // FTS 索引文本含檔名（ftsText），不能只改 doc_id 欄——整批 delete 後以新名重建。
+  // 回傳更新的 chunk 數（0 = 該專案無此文件）。
+  async renameDocument(projectId, oldDocId, newDocId) {
+    const run = this.db.transaction(() => {
+      const r = this.db
+        .prepare('UPDATE chunks SET doc_id = ? WHERE doc_id = ? AND project_id = ?')
+        .run(newDocId, oldDocId, projectId);
+      if (r.changes > 0 && this.ftsEnabled) {
+        this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ? AND project_id = ?').run(oldDocId, projectId);
+        const rows = this.db
+          .prepare('SELECT id, doc_id, title, content, project_id FROM chunks WHERE doc_id = ? AND project_id = ?')
+          .all(newDocId, projectId);
+        const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)');
+        for (const row of rows) ins.run(segmentForFts(ftsText(row.doc_id, row.title, row.content)), row.id, row.doc_id, row.project_id);
+      }
+      return r.changes;
+    });
+    return run();
+  }
+
   async movePhase(docId, projectId, newPhase) {
     this.db.prepare('UPDATE chunks SET phase = ? WHERE doc_id = ? AND project_id = ?').run(newPhase, docId, projectId);
   }

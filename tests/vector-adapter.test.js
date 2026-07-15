@@ -96,6 +96,31 @@ describe('vector adapter', () => {
     assert.equal(hits[0].title, 'I/O 規格');
   });
 
+  it('renameDocument:chunks 與 FTS 一體更新,新檔名詞可搜、舊檔名詞不再命中', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    await adapter.add([
+      { docId: 'OLDNAME.pdf', title: 'Features', text: '內文沒有檔名詞。', embedding: makeVec(0), projectId: 'p1' },
+      { docId: 'OLDNAME.pdf', title: 'Spec', text: '另一段內文。', embedding: makeVec(1), projectId: 'p1' },
+    ]);
+
+    const n = await adapter.renameDocument('p1', 'OLDNAME.pdf', 'THORDOC.pdf');
+    assert.equal(n, 2);
+
+    const docs = await adapter.listDocuments('p1');
+    assert.deepEqual(docs.map(d => d.docId), ['THORDOC.pdf'], 'DISTINCT 後只剩新名');
+
+    // 關鍵字腿:新檔名詞命中、舊檔名詞歸零(索引文本已重建)
+    assert.equal(adapter._keywordSearch('THORDOC', 10, 'p1').length, 2, '新檔名詞應命中');
+    assert.equal(adapter._keywordSearch('OLDNAME', 10, 'p1').length, 0, '舊檔名詞不應再命中');
+  });
+
+  it('renameDocument:專案無此文件 → 回 0 不變更', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    assert.equal(await adapter.renameDocument('p1', 'nope', 'x'), 0);
+  });
+
   it('舊版 projects 表（無 context 欄）→ 開啟時自動遷移且資料保留', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     // 直接以舊 schema 建 DB，模擬升級前的資料檔

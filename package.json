@@ -8,7 +8,7 @@
     "start": "node src/app.js",
     "dev": "node --watch src/app.js",
     "eval": "node scripts/eval-answers.js",
-    "test": "node --test tests/chunker.test.js tests/vector-adapter.test.js tests/ingestion.test.js tests/netlist-tool.test.js tests/llm-tools.test.js tests/read-only.test.js tests/ingest-folder.test.js tests/doc-view.test.js tests/project-resolve.test.js tests/project-context.test.js tests/retrieval-prompt.test.js tests/ollama-adapter.test.js tests/migrate.test.js tests/upload-name.test.js tests/upload-folder.test.js"
+    "test": "node --test tests/chunker.test.js tests/vector-adapter.test.js tests/ingestion.test.js tests/netlist-tool.test.js tests/llm-tools.test.js tests/read-only.test.js tests/ingest-folder.test.js tests/doc-view.test.js tests/project-resolve.test.js tests/project-context.test.js tests/retrieval-prompt.test.js tests/ollama-adapter.test.js tests/migrate.test.js tests/upload-name.test.js tests/upload-folder.test.js tests/rename-document.test.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
