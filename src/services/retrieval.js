@@ -8,7 +8,10 @@ const TOP_K = 5;
 // hybridSearch/search 先取比 TOP_K 更寬的候選池，再交給 LLM rerank 篩到 TOP_K：
 // 候選池太窄時，跨語言/跨文件關鍵字不匹配的正確片段可能連候選都排不進去（見
 // fts5-hybrid-search-gotchas 記憶），先擴大候選池才有機會被 rerank 選中。
-const RERANK_POOL_K = 15;
+// 25：實測有案例（中文查詢「電源輸入接頭 CN 編號」）正確 chunk 純向量排 #13、但被
+// RRF 融合裡爛的關鍵字排名（跨語言 #60）拖到融合後 #19–22，需要池夠大才涵蓋得到；
+// 涵蓋到之後 rerank 每次都能把它拉回 top-5 第一。
+const RERANK_POOL_K = 25;
 const MAX_TOOL_ROUNDS = 6;
 const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
 
