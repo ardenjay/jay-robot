@@ -34,14 +34,18 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
       + '你「必須繼續」用 netlist_net / netlist_trace 深入查那些候選,直到答出實際的連接關係,不可在拿到候選後就停下。\n'
       + '- 問題較籠統時(例如「USB 是怎麼連的」),自行挑 1–3 個最相關的 net/零件,逐一查詢並彙整回答;'
       + '需要時可在回答末尾請使用者指定更精確的 net/零件,但不可因為問得籠統就直接放棄。\n'
-      + '- 線路/連線類問題「不要」建議使用者上傳文件——板子的 netlist 本身就有答案,請持續用 netlist 工具查到底。\n';
+      + '- 線路/連線類問題「不要」建議使用者上傳文件——板子的 netlist 本身就有答案,請持續用 netlist 工具查到底。\n'
+      + '- 但若 netlist 工具查無相關結果,且問題其實是「用了哪顆晶片/零件、規格為何」這類文件也能回答的問題'
+      + '(例如「SoC 用哪一顆」),你「必須」接著呼叫 search_documents 從已上傳文件中找答案,不可只查 netlist 就回答找不到。\n';
   }
   s += `\n針對「文件內容類」問題,若 search_documents 的結果不足以回答,才說「${NO_ANSWER_PHRASE}」,`
     + '並根據下方 NPDS 文件目錄建議使用者上傳 1–3 份最相關的文件(含代碼、名稱、所屬階段)。'
     + '此「建議上傳文件」僅適用於文件內容類問題,不適用於線路/連線類問題。\n';
   // 使用者提供的專案背景：解讀專案代稱/縮寫時優先參考
   if (projectContext && projectContext.trim()) {
-    s += `\n## 專案背景(使用者提供)\n${projectContext.trim()}\n`;
+    s += '\n## 專案背景(使用者提供)\n'
+      + '以下背景由使用者直接提供,視為可信事實,可直接作為回答依據(不算「憑記憶猜測」):\n'
+      + `${projectContext.trim()}\n`;
   }
   s += `\n## NPDS 文件目錄(參考,供建議上傳用)\n${formatCatalogForPrompt(uploadedCodes)}`;
   return s;
