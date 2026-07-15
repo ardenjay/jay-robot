@@ -9,7 +9,7 @@ process.chdir(fs.mkdtempSync(path.join(os.tmpdir(), 'retrieval-prompt-')));
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { answer } = require('../src/services/retrieval');
+const { answer, shouldForceDocSearch } = require('../src/services/retrieval');
 
 // 以假 adapter / 假 store 擷取送給 LLM 的 contents，驗證 system instruction 的注入內容。
 // 不打真實 API、不碰真實 DB。
@@ -145,6 +145,62 @@ describe('強制首輪檢索（模型零工具就作答時的程式層防護）'
     for await (const e of answer('q', 'p1', adapter, store)) events.push(e);
     assert.equal(searchCalls.length, 1, '只有模型自己那次檢索,無強制追加');
     assert.equal(events.filter(e => e.type === 'tool').length, 1);
+  });
+
+  it('用了 netlist 但全部 miss、從未查文件 → 強制代跑一次 search_documents,模型依文件重答', async () => {
+    // 測試環境 netlist fixture 不可用(測試檔已 chdir 到 temp),netlist 呼叫一律回 ok:false→miss;
+    // 藉此觸發「用了 netlist 全 miss」路徑,不需真實 netlist。
+    let round = 0;
+    const searchCalls = [];
+    const adapter = {
+      embed: async () => [0.5],
+      chatWithTools: async (contents) => {
+        round++;
+        if (round === 1) return { functionCalls: [{ name: 'netlist_net', args: { netname: 'TSMC CN34' } }], text: null };
+        const hasForcedDoc = contents.some(c => c.role === 'function'
+          && c.parts.some(p => p.functionResponse && p.functionResponse.name === 'search_documents'));
+        return { functionCalls: [], text: hasForcedDoc ? '依文件作答:i2c control' : '查無此 net' };
+      },
+    };
+    const store = {
+      listProjects: async () => [{ id: 'p1', name: 'P', context: '' }],
+      listDocuments: async () => [],
+      isEmpty: () => false,
+      search: async (...a) => { searchCalls.push(a); return [{ docId: 'C430 TSMC.md', title: 't', text: 'CN34 i2c control' }]; },
+    };
+    const events = [];
+    for await (const e of answer('TSMC CN34 這條線做什麼', 'p1', adapter, store)) events.push(e);
+    assert.equal(searchCalls.length, 1, 'netlist 全 miss 應強制代跑一次文件檢索');
+    const toolEvents = events.filter(e => e.type === 'tool');
+    assert.deepEqual(toolEvents.map(t => t.name), ['netlist_net', 'search_documents']);
+    assert.equal(events.find(e => e.type === 'token').value, '依文件作答:i2c control');
+    assert.deepEqual(events.find(e => e.type === 'sources').value.map(s => s.docId), ['C430 TSMC.md']);
+  });
+});
+
+describe('shouldForceDocSearch 決策分支', () => {
+  const base = { hasDocs: true, usedDocSearch: false, forcedSearch: false, usedAnyTool: false, netlistCalls: 0, netlistMisses: 0 };
+
+  it('零工具就作答 → 強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base }), true);
+  });
+  it('用了 netlist 且全部 miss → 強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, netlistCalls: 2, netlistMisses: 2 }), true);
+  });
+  it('netlist 有一次命中(非全 miss) → 不強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, netlistCalls: 2, netlistMisses: 1 }), false);
+  });
+  it('已成功查過文件 → 不強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, usedDocSearch: true, netlistCalls: 1, netlistMisses: 1 }), false);
+  });
+  it('已強制過一次 → 不再強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, forcedSearch: true }), false);
+  });
+  it('專案無文件 → 不強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, hasDocs: false }), false);
+  });
+  it('用了 netlist 但一次也沒 miss(全命中) → 不強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, netlistCalls: 1, netlistMisses: 0 }), false);
   });
 });
 

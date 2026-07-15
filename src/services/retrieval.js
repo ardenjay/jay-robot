@@ -52,8 +52,9 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
       + '- 問題較籠統時(例如「USB 是怎麼連的」),自行挑 1–3 個最相關的 net/零件,逐一查詢並彙整回答;'
       + '需要時可在回答末尾請使用者指定更精確的 net/零件,但不可因為問得籠統就直接放棄。\n'
       + '- 線路/連線類問題「不要」建議使用者上傳文件——板子的 netlist 本身就有答案,請持續用 netlist 工具查到底。\n'
-      + '- 但若 netlist 工具查無相關結果,且問題其實是「用了哪顆晶片/零件、規格為何」這類文件也能回答的問題'
-      + '(例如「SoC 用哪一顆」),你「必須」接著呼叫 search_documents 從已上傳文件中找答案,不可只查 netlist 就回答找不到。\n';
+      + '- 但若 netlist 工具查無相關結果(所有查詢都 found:false),而問題其實文件也可能回答'
+      + '(不限於晶片/零件/規格,也包含某連接器/介面的用途、某編號代表什麼等),你「必須」接著呼叫 search_documents'
+      + '從已上傳文件中找答案,不可只查 netlist 就回答找不到。\n';
   }
   s += `\n針對「文件內容類」問題,若 search_documents 的結果不足以回答,才說「${NO_ANSWER_PHRASE}」,`
     + '並根據下方 NPDS 文件目錄建議使用者上傳 1–3 份最相關的文件(含代碼、名稱、所屬階段)。'
@@ -62,6 +63,15 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
     + '出現在檢索結果或來源中的文件代表「已經上傳」,不可建議使用者上傳它們。\n';
   s += `\n## NPDS 文件目錄(參考,供建議上傳用)\n${formatCatalogForPrompt(uploadedCodes)}`;
   return s;
+}
+
+// 是否該由系統代跑一次強制文件檢索（純函式，便於窮舉各分支測試）。
+// 前提：專案有文件、整段對話從未成功查過文件、且尚未強制過。滿足前提後，
+// 「完全沒用工具」或「用了 netlist 但每次查詢都 miss」時回 true；netlist 有任一命中則回 false。
+function shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses }) {
+  if (!hasDocs || usedDocSearch || forcedSearch) return false;
+  const allNetlistMissed = netlistCalls > 0 && netlistMisses === netlistCalls;
+  return !usedAnyTool || allNetlistMissed;
 }
 
 // 文件檢索：embed 問題 → hybrid search（向量 + 關鍵字融合）取 top-K chunks，
@@ -119,17 +129,24 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
   const sources = new Map();
 
   let usedAnyTool = false;
+  let usedDocSearch = false;
   let forcedSearch = false;
+  // netlist 全 miss 的偵測：問題被路由到 netlist 但每一次查詢都查無結果時，
+  // 模型常直接回「查無此 net」放棄，不再試文件——即使答案其實在文件裡。
+  let netlistCalls = 0;
+  let netlistMisses = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const { functionCalls, text } = await adapter.chatWithTools(contents, tools);
 
     if (!functionCalls.length) {
-      // 程式層防護：小模型（如 qwen3:14b）可能無視「必須先檢索」的 prompt 規則，
-      // 一個工具都沒呼叫就作答。此時系統代跑一次文件檢索、以工具回合塞回歷史，
-      // 讓模型依據檢索結果重答（僅強制一次，避免迴圈）。
-      if (!usedAnyTool && !forcedSearch && hasDocs) {
+      // 程式層防護：小模型（如 qwen3:14b）對 prompt 規則不可靠，可能沒查文件就作答。
+      // 兩種情境代跑一次文件檢索、以工具回合塞回歷史讓模型重答（僅強制一次，避免迴圈）：
+      // (a) 完全沒用工具就作答；(b) 只用了 netlist 且每次查詢都 miss（found:false / 工具錯誤）。
+      // 只要曾成功查過文件（usedDocSearch），或 netlist 有任一命中，就不介入。
+      if (shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses })) {
         forcedSearch = true;
+        usedDocSearch = true;
         console.log(`[tool] search_documents(forced) ${JSON.stringify({ query: question })}`);
         yield { type: 'tool', name: 'search_documents', args: { query: question } };
         const response = await runSearchDocuments(adapter, store, question, projectId, sources, projectContext);
@@ -153,9 +170,13 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
       yield { type: 'tool', name: fc.name, args: fc.args || {} };
       let response;
       if (fc.name === 'search_documents') {
+        usedDocSearch = true;
         response = await runSearchDocuments(adapter, store, fc.args.query || question, projectId, sources, projectContext);
       } else {
         const r = await netlist.runNetlistTool(projectName, fc.name, fc.args || {});
+        netlistCalls++;
+        // miss：工具執行錯誤，或查詢明確回 found:false（net/part/pin/find 查無結果）
+        if (!r.ok || (r.result && r.result.found === false)) netlistMisses++;
         response = r.ok ? r.result : { error: r.error };
       }
       responseParts.push({ functionResponse: { name: fc.name, response } });
@@ -167,4 +188,4 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
   yield { type: 'sources', value: [] };
 }
 
-module.exports = { answer };
+module.exports = { answer, shouldForceDocSearch };
