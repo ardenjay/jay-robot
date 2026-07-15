@@ -11,6 +11,10 @@ RAG 回答的 system instruction SHALL 固定包含目前專案名稱;專案 `co
 - **WHEN** 專案 context 為「100T = EAR-100T7」時提問
 - **THEN** system instruction 含「專案背景(使用者提供)」區塊與該內容,並明示為可信、可直接引用的事實
 
+#### Scenario: context 同時作為檢索結果首個 chunk
+- **WHEN** context 非空且(模型或系統強制)呼叫 search_documents
+- **THEN** 工具結果的第一個 chunk 為專案背景(title 標示「專案背景(使用者提供,可信事實)」、docId 為 null、不列入 sources),真實檢索 chunks 排在其後——小模型(qwen3:14b)實測只依據工具結果作答、忽略 system prompt 內的背景,塞進工具結果才會被使用
+
 ### Requirement: Project settings UI
 專案詳情頁 SHALL 提供「專案設定」入口編輯背景說明(textarea + 儲存);唯讀模式 SHALL 隱藏此入口。儲存狀態 SHALL 清楚可辨:輸入內容與伺服器已存值不同時,儲存鈕可按並提示有未儲存的變更;相同時(含剛儲存成功、剛載入頁面)儲存鈕鎖定並顯示已儲存狀態。
 

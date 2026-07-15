@@ -148,6 +148,51 @@ describe('強制首輪檢索（模型零工具就作答時的程式層防護）'
   });
 });
 
+describe('專案背景作為檢索結果首個 chunk', () => {
+  function run(context) {
+    let round = 0;
+    const capture = {};
+    const adapter = {
+      embed: async () => [0.5],
+      chatWithTools: async (contents) => {
+        round++;
+        capture.contents = contents;
+        if (round === 1) return { functionCalls: [{ name: 'search_documents', args: { query: 'SoC' } }], text: null };
+        return { functionCalls: [], text: '答案' };
+      },
+    };
+    const store = {
+      listProjects: async () => [{ id: 'p1', name: 'P', context }],
+      listDocuments: async () => [],
+      isEmpty: () => false,
+      search: async () => [{ docId: 'C208', title: 't', text: 'Host SoC' }],
+    };
+    return { adapter, store, capture };
+  }
+
+  it('context 非空 → 工具結果首個 chunk 為背景(docId null),真實 chunks 照舊,sources 不含背景', async () => {
+    const { adapter, store, capture } = run('SoC = Jetson T5000');
+    const events = [];
+    for await (const e of answer('用哪顆 SoC', 'p1', adapter, store)) events.push(e);
+
+    const fnResp = capture.contents.find(c => c.role === 'function').parts[0].functionResponse.response;
+    assert.equal(fnResp.chunk_count, 2);
+    assert.equal(fnResp.chunks[0].title, '專案背景(使用者提供,可信事實)');
+    assert.equal(fnResp.chunks[0].text, 'SoC = Jetson T5000');
+    assert.equal(fnResp.chunks[0].docId, null);
+    assert.equal(fnResp.chunks[1].docId, 'C208');
+    assert.deepEqual(events.find(e => e.type === 'sources').value.map(s => s.docId), ['C208'], '背景不列入來源');
+  });
+
+  it('context 為空 → 工具結果不含背景 chunk', async () => {
+    const { adapter, store, capture } = run('');
+    for await (const _ of answer('用哪顆 SoC', 'p1', adapter, store)) {}
+    const fnResp = capture.contents.find(c => c.role === 'function').parts[0].functionResponse.response;
+    assert.equal(fnResp.chunk_count, 1);
+    assert.equal(fnResp.chunks[0].docId, 'C208');
+  });
+});
+
 describe('search_documents 檢索路徑（hybrid / fallback）', () => {
   // 第一輪要求 search_documents，第二輪收工，藉此觸發 runSearchDocuments
   function makeToolAdapter() {

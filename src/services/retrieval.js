@@ -61,7 +61,10 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
 
 // 文件檢索：embed 問題 → hybrid search（向量 + 關鍵字融合）取 top-K chunks，
 // 並把來源 docId 累積到 sources。store 未提供 hybridSearch（舊注入物件）時退回純向量。
-async function runSearchDocuments(adapter, store, query, projectId, sources) {
+// projectContext 非空時作為首個 chunk 一併回傳（不列入 sources）：qwen3:14b 實測只信工具
+// 結果、無視 system prompt 裡的背景（「務必根據工具結果回答」壓過「背景可直接引用」），
+// 把背景塞進工具結果它才會用。
+async function runSearchDocuments(adapter, store, query, projectId, sources, projectContext) {
   const queryVector = await adapter.embed(query);
   const chunks = typeof store.hybridSearch === 'function'
     ? await store.hybridSearch(query, queryVector, TOP_K, projectId)
@@ -69,10 +72,11 @@ async function runSearchDocuments(adapter, store, query, projectId, sources) {
   for (const c of chunks) {
     sources.set(c.docId, { docId: c.docId, url: `/documents/${projectId}/${encodeURIComponent(c.docId)}` });
   }
-  return {
-    chunk_count: chunks.length,
-    chunks: chunks.map(c => ({ title: c.title, text: c.text, docId: c.docId })),
-  };
+  const out = chunks.map(c => ({ title: c.title, text: c.text, docId: c.docId }));
+  if (projectContext && projectContext.trim()) {
+    out.unshift({ title: '專案背景(使用者提供,可信事實)', text: projectContext.trim(), docId: null });
+  }
+  return { chunk_count: out.length, chunks: out };
 }
 
 // 以 LLM 工具呼叫迴圈回答問題。adapter / store 可注入(預設用模組 singleton)。
@@ -122,7 +126,7 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
         forcedSearch = true;
         console.log(`[tool] search_documents(forced) ${JSON.stringify({ query: question })}`);
         yield { type: 'tool', name: 'search_documents', args: { query: question } };
-        const response = await runSearchDocuments(adapter, store, question, projectId, sources);
+        const response = await runSearchDocuments(adapter, store, question, projectId, sources, projectContext);
         contents.push({ role: 'model', parts: [{ functionCall: { name: 'search_documents', args: { query: question } } }] });
         contents.push({ role: 'function', parts: [{ functionResponse: { name: 'search_documents', response } }] });
         continue;
@@ -143,7 +147,7 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
       yield { type: 'tool', name: fc.name, args: fc.args || {} };
       let response;
       if (fc.name === 'search_documents') {
-        response = await runSearchDocuments(adapter, store, fc.args.query || question, projectId, sources);
+        response = await runSearchDocuments(adapter, store, fc.args.query || question, projectId, sources, projectContext);
       } else {
         const r = await netlist.runNetlistTool(projectName, fc.name, fc.args || {});
         response = r.ok ? r.result : { error: r.error };
