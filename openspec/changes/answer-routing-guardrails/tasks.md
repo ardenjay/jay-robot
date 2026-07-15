@@ -3,6 +3,7 @@
 - [x] 1.1 `src/services/retrieval.js`:netlist 落空且問題屬「用哪顆料/規格」類 → 必須接著呼叫 search_documents
 - [x] 1.2 `src/services/retrieval.js`:文件內容類問題一律先檢索;專案名稱/背景僅供解讀代稱,不可判定離題
 - [x] 1.3 `src/services/retrieval.js`:專案背景區塊明示為可信事實、可直接引用
+- [x] 1.4 `src/services/retrieval.js`:文件檢索漸進式——第一輪不足以完整回答時,用結果中的料號/單號換關鍵字再檢索 1–3 輪
 
 ## 2. 專案設定 UI 儲存狀態(已隨 36bae3b 上線)
 
