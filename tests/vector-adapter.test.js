@@ -67,6 +67,18 @@ describe('vector adapter', () => {
     assert.equal(hits[0].title, '介面 › I/O 規格', '標題詞應被關鍵字腿命中並排前');
   });
 
+  it('FTS 索引含文件名:關鍵字只出現在 docId 也能命中', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    await adapter.add([
+      { docId: 'C455 EAR-100T_UM.docx', title: 'Features', text: 'Supports 2 x CAN bus', embedding: makeVec(0), projectId: 'p1' },
+      { docId: 'MTi 600', title: 'CAN output', text: 'CAN CAN CAN 的協定細節。', embedding: makeVec(1), projectId: 'p1' },
+    ]);
+    // 「100t」只在第一筆的 docId;若文件名不進索引,CAN 高密度的第二筆會壓過答案
+    const hits = await adapter.hybridSearch('100T 有幾個 CAN', makeVec(5), 2, 'p1');
+    assert.equal(hits[0].docId, 'C455 EAR-100T_UM.docx', '文件名帶 100T 的 chunk 應排前');
+  });
+
   it('user_version 落後 → 開啟時 FTS 一次性重建(舊 chunks 的 title 納入索引)', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     // 建一個「舊索引」DB:FTS 只有內文、user_version 歸零

@@ -42,11 +42,16 @@ const RRF_K = 60; // Reciprocal Rank Fusion 常數，文獻慣用值
 
 // FTS 索引定義版本（PRAGMA user_version）：定義變更時 bump，啟動即一次性整表重建。
 // v2：content_seg 由「title + 內文」組成，標題詞（章節路徑）可被關鍵字命中。
-const FTS_VERSION = 2;
+// v3：再加上 doc_id（文件名）——「100T 有幾個 CAN」的答案 chunk 標題與內文都沒有
+//     「100T」，只有文件名（C455 EAR-100T_UM…）帶著；文件名不進索引就永遠輸給
+//     內文碰巧含該詞的無關 chunks。
+// v4：定義同 v3。實際部署曾在 v3 改版「改到一半」時重啟（版本號已是 3、取值行還是舊的），
+//     導致 v2 內容掛上 v3 版本戳、之後永遠跳過重建；bump 一版強制重建修復。
+const FTS_VERSION = 4;
 
-// FTS 索引文本：標題（章節路徑）+ 內文
-function ftsText(title, content) {
-  return title ? `${title}\n${content}` : content;
+// FTS 索引文本：文件名 + 標題（章節路徑）+ 內文
+function ftsText(docId, title, content) {
+  return [docId, title, content].filter(Boolean).join('\n');
 }
 
 function cosineSimilarity(a, b) {
@@ -133,7 +138,7 @@ class SqliteVectorAdapter extends VectorAdapter {
       this.db.prepare('DELETE FROM chunks_fts').run();
       const rows = this.db.prepare('SELECT id, doc_id, title, content, project_id FROM chunks').all();
       const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)');
-      for (const r of rows) ins.run(segmentForFts(ftsText(r.title, r.content)), r.id, r.doc_id, r.project_id);
+      for (const r of rows) ins.run(segmentForFts(ftsText(r.doc_id, r.title, r.content)), r.id, r.doc_id, r.project_id);
     });
     rebuild();
   }
@@ -157,7 +162,7 @@ class SqliteVectorAdapter extends VectorAdapter {
           chunk.phase || ''
         );
         // FTS 與 chunks 同一交易寫入，維持兩表同步（索引文本含 title，見 ftsText）
-        if (insFts) insFts.run(segmentForFts(ftsText(chunk.title, chunk.text)), r.lastInsertRowid, chunk.docId, projectId);
+        if (insFts) insFts.run(segmentForFts(ftsText(chunk.docId, chunk.title, chunk.text)), r.lastInsertRowid, chunk.docId, projectId);
       }
     });
     insertMany(chunks);
