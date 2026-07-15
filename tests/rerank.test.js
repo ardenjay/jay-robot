@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { rerankChunks } = require('../src/services/rerank');
+const { rerankChunks, buildSnippet } = require('../src/services/rerank');
 
 function chunk(i) {
   return { docId: `d${i}`, title: `t${i}`, text: `內容 ${i}` };
@@ -49,5 +49,46 @@ describe('rerankChunks', () => {
     const adapter = { generate: async () => '[2, 2, 2]' };
     const result = await rerankChunks(adapter, 'q', chunks, 3);
     assert.deepEqual(result.map(c => c.docId), ['d2', 'd0', 'd1']);
+  });
+});
+
+describe('buildSnippet（query-aware 片段）', () => {
+  it('短 text → 原樣回傳', () => {
+    assert.equal(buildSnippet('TPM 版本', '很短的內容'), '很短的內容');
+  });
+
+  it('長 text 且關鍵字只出現在後段（head 之後）→ 片段含該關鍵字命中視窗', () => {
+    const text = 'A'.repeat(500) + ' Security TPM 2.0 詳細 ' + 'B'.repeat(500);
+    const snip = buildSnippet('EAR-100T TPM 版本', text);
+    assert.ok(snip.includes('TPM 2.0'), '後段關鍵字應被視窗帶出:\n' + snip);
+    assert.ok(snip.includes('…'), '應含 head 與視窗的分隔符');
+    assert.ok(snip.length < text.length, '仍應短於整段');
+  });
+
+  it('長 text 但關鍵字在前段(head 內)→ 只取 head，不另附視窗', () => {
+    const text = 'TPM 2.0 開頭就有 ' + 'C'.repeat(600);
+    const snip = buildSnippet('TPM 版本', text);
+    assert.ok(!snip.includes('…'), '前段已含關鍵字,不需附視窗');
+    assert.ok(snip.startsWith('TPM 2.0'));
+  });
+
+  it('通用詞在前段命中、答案關鍵字在後段 → 不被前段命中誤導,仍附後段視窗', () => {
+    // 「EAR」在 head 內命中,但真正答案關鍵字「Dimension」在 head 之後——只看 head 之後的命中
+    const text = 'EAR-100T7 系統 ' + 'D'.repeat(450) + ' Dimension 200 x 145 x 97 mm ' + 'E'.repeat(100);
+    const snip = buildSnippet('EAR-100T Dimension 尺寸', text);
+    assert.ok(snip.includes('200 x 145'), '後段的 Dimension 應被視窗帶出,不因 EAR 前段命中而漏掉:\n' + snip);
+  });
+
+  it('query 切不出有效詞 → 退回 head（不炸、不更差）', () => {
+    const text = 'X'.repeat(600) + ' 答案在這 ' + 'Y'.repeat(200);
+    const snip = buildSnippet('、。，', text);
+    assert.equal(snip.length, 400, '無有效詞時等同取前 HEAD_LEN');
+  });
+
+  it('關鍵字完全沒出現在 text → 只取 head', () => {
+    const text = 'Z'.repeat(700);
+    const snip = buildSnippet('完全不相關的詞', text);
+    assert.ok(!snip.includes('…'));
+    assert.equal(snip.length, 400);
   });
 });
