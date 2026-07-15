@@ -92,6 +92,17 @@ const NETLIST_TOOL_DECLARATIONS = [
   },
 ];
 
+// 判斷一次 netlist 工具呼叫是否「查無結果」。各工具查無結構不一致：
+// net/part/pin/trace → found:false；find → count:0（無 found 欄位）；info → 總覽（無 miss 概念）。
+// 工具執行錯誤（!ok）亦視為 miss。供 retrieval 工具迴圈判定是否該 fallback 到文件檢索。
+function isNetlistMiss(r) {
+  if (!r || !r.ok) return true;
+  const res = r.result || {};
+  if (res.found === false) return true;
+  if (res.count === 0) return true;
+  return false;
+}
+
 // 由工具名稱 + 參數 分派到對應查詢，供工具迴圈呼叫
 function runNetlistTool(projectName, name, args = {}) {
   switch (name) {
@@ -118,4 +129,5 @@ module.exports = {
   queryTrace,
   NETLIST_TOOL_DECLARATIONS,
   runNetlistTool,
+  isNetlistMiss,
 };

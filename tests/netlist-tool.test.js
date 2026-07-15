@@ -8,6 +8,7 @@ const {
   queryTrace,
   runNetlistTool,
   NETLIST_TOOL_DECLARATIONS,
+  isNetlistMiss,
 } = require('../src/services/netlist');
 
 // 唯讀地對 tools/netlist/100T 測試；不觸碰 data/rag.db。
@@ -59,6 +60,36 @@ describe('netlist tool service', () => {
     const names = NETLIST_TOOL_DECLARATIONS.map(d => d.name);
     assert.ok(names.includes('netlist_part'));
     assert.ok(names.includes('netlist_trace'));
+  });
+
+  describe('isNetlistMiss 涵蓋各工具查無結構', () => {
+    it('net 查無(found:false) → miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_net', { netname: 'NO_SUCH_NET' })), true);
+    });
+    it('part 查無(found:false) → miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_part', { refdes: 'U99999' })), true);
+    });
+    it('find 零命中(count:0,無 found 欄位) → miss（回歸此 change 修的漏洞）', async () => {
+      const r = await runNetlistTool('100T', 'netlist_find', { keyword: 'NO_SUCH_KEYWORD_XYZ' });
+      assert.equal(r.result.found, undefined, 'find 回傳確實無 found 欄位');
+      assert.equal(r.result.count, 0);
+      assert.equal(isNetlistMiss(r), true, 'count:0 也要判為 miss');
+    });
+    it('find 有命中(count>0) → 非 miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_find', { keyword: 'RTL' })), false);
+    });
+    it('part 命中(found:true) → 非 miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_part', { refdes: 'U42' })), false);
+    });
+    it('trace 命中 → 非 miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_trace', { pin: 'U42.4' })), false);
+    });
+    it('info 總覽 → 非 miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('100T', 'netlist_info', {})), false);
+    });
+    it('工具執行錯誤(ok:false) → miss', async () => {
+      assert.equal(isNetlistMiss(await runNetlistTool('no-such-board', 'netlist_net', { netname: 'X' })), true);
+    });
   });
 
   it('truncates a large net (GND) and includes a summary', async () => {

@@ -178,8 +178,8 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
       } else {
         const r = await netlist.runNetlistTool(projectName, fc.name, fc.args || {});
         netlistCalls++;
-        // miss：工具執行錯誤，或查詢明確回 found:false（net/part/pin/find 查無結果）
-        if (!r.ok || (r.result && r.result.found === false)) netlistMisses++;
+        // miss 判定涵蓋各工具查無結構（found:false / find 的 count:0 / 工具錯誤），見 netlist.isNetlistMiss
+        if (netlist.isNetlistMiss(r)) netlistMisses++;
         response = r.ok ? r.result : { error: r.error };
       }
       responseParts.push({ functionResponse: { name: fc.name, response } });
