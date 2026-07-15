@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Answer prompt includes project name and context
-RAG 回答的 system instruction SHALL 固定包含目前專案名稱;專案 `context` 非空時 SHALL 另含「專案背景(使用者提供)」區塊(置於 NPDS 文件目錄之前),供模型解讀專案代稱與背景。背景區塊 SHALL 明示其內容為使用者直接提供的可信事實、可直接作為回答依據;名稱與背景 SHALL NOT 被用來判定使用者的問題與專案無關(見 rag-query 的路由防護需求)。
+RAG 回答的 system instruction SHALL 固定包含目前專案名稱;專案 `context` 非空時 SHALL 另含「專案背景(使用者提供)」區塊,置於 system instruction 開頭(名稱行之後、工具規則與 NPDS 目錄之前)——小模型對長 prompt 中段注意力差,背景塞在中段會被忽略。背景區塊 SHALL 明示其內容為使用者直接提供的可信事實、可直接作為回答依據,並指示模型回答前先檢查背景是否已含答案;名稱與背景 SHALL NOT 被用來判定使用者的問題與專案無關(見 rag-query 的路由防護需求)。
 
 #### Scenario: 專案名稱固定注入
 - **WHEN** 對名為「100T」的專案提問(context 為空)

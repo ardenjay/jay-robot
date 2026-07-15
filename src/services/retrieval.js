@@ -23,7 +23,15 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
   // 專案名稱固定注入：讓模型知道「100T」這類代稱指的是專案本身，而非某顆零件
   if (projectName) {
     s += `目前專案名稱:「${projectName}」。使用者提到這個名稱時,通常指本專案(產品)本身,而非某個零件。`
-      + '此名稱與下方專案背景僅供解讀代稱,「不可」用來判定使用者的問題與專案無關。\n';
+      + '此名稱與專案背景僅供解讀代稱,「不可」用來判定使用者的問題與專案無關。\n';
+  }
+  // 背景放最前面：qwen3:14b 這類小模型對長 prompt 中段的注意力差(lost in the middle)，
+  // 塞在規則與目錄之間會被忽略(實測「SoC 用哪顆」背景有寫仍答不出)。
+  if (projectContext && projectContext.trim()) {
+    s += '\n## 專案背景(使用者提供)\n'
+      + '以下背景由使用者直接提供,視為可信事實,可直接作為回答依據(不算「憑記憶猜測」);'
+      + '回答前先檢查背景是否已含答案,若有就直接引用,再視需要以工具補充細節:\n'
+      + `${projectContext.trim()}\n\n`;
   }
   s += '你可以使用工具查資料,務必根據工具結果回答,不要憑記憶或猜測。\n'
     + '- 文件內容類問題(規格、價格、報價、採購、測試報告、日期等)一律「先呼叫 search_documents 檢索」;'
@@ -44,13 +52,9 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
   }
   s += `\n針對「文件內容類」問題,若 search_documents 的結果不足以回答,才說「${NO_ANSWER_PHRASE}」,`
     + '並根據下方 NPDS 文件目錄建議使用者上傳 1–3 份最相關的文件(含代碼、名稱、所屬階段)。'
-    + '此「建議上傳文件」僅適用於文件內容類問題,不適用於線路/連線類問題。\n';
-  // 使用者提供的專案背景：解讀專案代稱/縮寫時優先參考
-  if (projectContext && projectContext.trim()) {
-    s += '\n## 專案背景(使用者提供)\n'
-      + '以下背景由使用者直接提供,視為可信事實,可直接作為回答依據(不算「憑記憶猜測」):\n'
-      + `${projectContext.trim()}\n`;
-  }
+    + '此「建議上傳文件」僅適用於文件內容類問題,不適用於線路/連線類問題。'
+    + '建議上傳的文件「只能」從下方目錄挑選(目錄已排除已上傳的);'
+    + '出現在檢索結果或來源中的文件代表「已經上傳」,不可建議使用者上傳它們。\n';
   s += `\n## NPDS 文件目錄(參考,供建議上傳用)\n${formatCatalogForPrompt(uploadedCodes)}`;
   return s;
 }

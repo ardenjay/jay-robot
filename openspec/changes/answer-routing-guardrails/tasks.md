@@ -5,6 +5,7 @@
 - [x] 1.3 `src/services/retrieval.js`:專案背景區塊明示為可信事實、可直接引用
 - [x] 1.4 `src/services/retrieval.js`:文件檢索漸進式——第一輪不足以完整回答時,用結果中的料號/單號換關鍵字再檢索 1–3 輪
 - [x] 1.5 `src/services/retrieval.js`:程式層強制首輪檢索——模型零工具就作答時代跑一次 search_documents 塞回重答(最多一次);含測試 ×3
+- [x] 1.6 `src/services/retrieval.js`:專案背景移到 prompt 開頭(lost-in-the-middle 對策)並指示先查背景;禁止建議上傳已上傳的文件
 
 ## 2. 專案設定 UI 儲存狀態(已隨 36bae3b 上線)
 
