@@ -46,7 +46,9 @@ process.chdir(sandbox);
 const { answer } = require(path.join(REPO_ROOT, 'src/services/retrieval'));
 const vectorStore = require(path.join(REPO_ROOT, 'src/adapters/vector'));
 
-async function runCase(c, projectId) {
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function runOnce(c, projectId) {
   const started = Date.now();
   const toolCalls = [];
   let text = '';
@@ -56,6 +58,22 @@ async function runCase(c, projectId) {
   }
   const pass = c.expectAny.some(k => text.toLowerCase().includes(k.toLowerCase()));
   return { pass, text, toolCalls, seconds: Math.round((Date.now() - started) / 1000) };
+}
+
+// 單題容錯：answer() 拋錯（如本機 Ollama 持續負載下偶發掉連線）時，先等數秒重試一次；
+// 仍失敗回傳 { error }，讓主迴圈記為 ERROR 並續跑，不讓單題例外摧毀整批 13 分鐘回歸。
+async function runCase(c, projectId) {
+  try {
+    return await runOnce(c, projectId);
+  } catch (err) {
+    console.log(`   ⚠️ 首次執行拋錯，3 秒後重試一次：${err.message}`);
+    await sleep(3000);
+    try {
+      return await runOnce(c, projectId);
+    } catch (err2) {
+      return { error: err2.message };
+    }
+  }
 }
 
 (async () => {
@@ -74,8 +92,17 @@ async function runCase(c, projectId) {
   console.log(`專案:${project.name}｜案例檔:${path.basename(casesPath)}｜cases:${cases.length}${values.smoke ? '（smoke）' : ''}｜LLM_ADAPTER=${process.env.LLM_ADAPTER}\n`);
 
   let hardFail = 0;
+  let errorCount = 0;
   for (const c of cases) {
     const r = await runCase(c, project.id);
+    if (r.error !== undefined) {
+      errorCount++;
+      console.log(`⚠️ ERROR  ${c.q}`);
+      console.log(`   執行失敗（重試後仍失敗）:${r.error}`);
+      if (c.note) console.log(`   備註:${c.note}`);
+      console.log();
+      continue;
+    }
     const tag = r.pass ? '✅ PASS' : (c.knownFail ? '🟡 KNOWN-FAIL' : '❌ FAIL');
     if (!r.pass && !c.knownFail) hardFail++;
     if (r.pass && c.knownFail) console.log('   （knownFail 已轉綠，可從 evals/answer-cases.json 移除標記）');
@@ -88,6 +115,7 @@ async function runCase(c, projectId) {
   }
 
   fs.rmSync(sandbox, { recursive: true, force: true });
-  console.log(hardFail ? `結果:${hardFail} 個非 knownFail 的 case 失敗` : '結果:全數通過（knownFail 除外）');
-  process.exit(hardFail ? 1 : 0);
+  const errNote = errorCount ? `；${errorCount} 個 ERROR（執行例外，非測試失敗）` : '';
+  console.log((hardFail ? `結果:${hardFail} 個非 knownFail 的 case 失敗` : '結果:全數通過（knownFail 除外）') + errNote);
+  process.exit(hardFail ? 1 : (errorCount ? 3 : 0));
 })().catch(err => { console.error('EVAL ERROR:', err); process.exit(2); });
