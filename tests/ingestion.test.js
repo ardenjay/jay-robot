@@ -46,6 +46,25 @@ describe('ingestion pipeline', () => {
     assert.equal(results.length, 3, 'DB 中應有 3 筆');
   });
 
+  it('embedding 輸入含章節路徑 title,DB content 維持純內文', async () => {
+    const dbPath = tmpPath('.db'); cleanup.push(dbPath);
+    const mdPath = tmpPath('.md'); cleanup.push(mdPath);
+    fs.writeFileSync(mdPath, `# 介面\n\n## 通訊\n\n規格表內容。`);
+
+    const embedInputs = [];
+    const capturingLLM = {
+      async embedBatch(texts) { embedInputs.push(...texts); return texts.map(() => new Array(3072).fill(0)); },
+    };
+    const store = new SqliteVectorAdapter(dbPath);
+    await ingestFile(mdPath, 'spec.md', 'proj-test', 'C1', capturingLLM, store);
+
+    assert.equal(embedInputs.length, 1);
+    assert.equal(embedInputs[0], '介面 › 通訊\n規格表內容。', 'embedding 輸入應為 title+換行+內文');
+    const [chunk] = await store.search(new Array(3072).fill(0), 1, 'proj-test');
+    assert.equal(chunk.text, '規格表內容。', 'content 欄位不應混入 title');
+    assert.equal(chunk.title, '介面 › 通訊');
+  });
+
   it('同一 docId 重新 ingest，DB 只保留最新的 chunks', async () => {
     const dbPath = tmpPath('.db'); cleanup.push(dbPath);
     const mdPath1 = tmpPath('.md'); cleanup.push(mdPath1);
@@ -64,7 +83,7 @@ describe('ingestion pipeline', () => {
     assert.equal(results.length, 2, 'DB 應只有第二次的 2 個 chunks');
     const titles = results.map(r => r.title);
     assert.ok(titles.includes('新章節一'));
-    assert.ok(titles.includes('新章節二'));
+    assert.ok(titles.includes('新章節一 › 新章節二'), 'title 為完整章節路徑');
     assert.ok(!titles.includes('舊章節'), '舊章節不應存在');
   });
 });

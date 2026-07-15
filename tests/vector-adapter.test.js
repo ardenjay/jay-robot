@@ -55,6 +55,35 @@ describe('vector adapter', () => {
     assert.equal(results.length, 0);
   });
 
+  it('FTS 索引含 title：關鍵字只出現在章節路徑也能命中', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    await adapter.add([
+      { docId: 'UM.md', title: '介面 › I/O 規格', text: '本機提供多種周邊介面。', embedding: makeVec(0), projectId: 'p1' },
+      { docId: 'UM.md', title: '機構', text: '外殼尺寸與散熱設計。', embedding: makeVec(1), projectId: 'p1' },
+    ]);
+    // 查詢向量取正交向量,讓向量腿沒有偏好;關鍵字「規格」只在 title 出現
+    const hits = await adapter.hybridSearch('I/O 規格', makeVec(5), 2, 'p1');
+    assert.equal(hits[0].title, '介面 › I/O 規格', '標題詞應被關鍵字腿命中並排前');
+  });
+
+  it('user_version 落後 → 開啟時 FTS 一次性重建(舊 chunks 的 title 納入索引)', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    // 建一個「舊索引」DB:FTS 只有內文、user_version 歸零
+    const a1 = new SqliteVectorAdapter(dbPath);
+    await a1.add([{ docId: 'UM.md', title: 'I/O 規格', text: '周邊介面清單。', embedding: makeVec(0), projectId: 'p1' }]);
+    a1.db.prepare('DELETE FROM chunks_fts').run();
+    a1.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) SELECT lower(content), id, doc_id, project_id FROM chunks').run();
+    a1.db.pragma('user_version = 0');
+    a1.db.close();
+
+    const a2 = new SqliteVectorAdapter(dbPath);
+    assert.equal(a2.db.pragma('user_version', { simple: true }) >= 2, true, '重建後應寫回版本戳');
+    const hits = await a2.hybridSearch('規格', makeVec(5), 1, 'p1');
+    assert.equal(hits.length, 1, '重建後標題詞應可命中');
+    assert.equal(hits[0].title, 'I/O 規格');
+  });
+
   it('舊版 projects 表（無 context 欄）→ 開啟時自動遷移且資料保留', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     // 直接以舊 schema 建 DB，模擬升級前的資料檔

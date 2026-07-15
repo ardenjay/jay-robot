@@ -13,13 +13,19 @@ const EMBED_BATCH_SIZE = 100;
 function parseAndChunk(markdownText, filename) {
   const tokens = marked.lexer(markdownText);
   const chunks = [];
-  let currentTitle = filename;
+  // 標題階層堆疊：title 為完整章節路徑（H1 › H2 › H3），深層小節才保得住脈絡，
+  // 且路徑會參與 embedding/FTS 比對。無任何標題時 title 為檔名。
+  const headingStack = [];
   let currentText = '';
+
+  const currentTitle = () =>
+    (headingStack.length ? headingStack.map(h => h.text).join(' › ') : filename);
 
   function flushChunk() {
     const text = currentText.trim();
     if (text) {
-      splitLongChunk(text, currentTitle).forEach(t => chunks.push({ title: currentTitle, text: t }));
+      const title = currentTitle();
+      splitLongChunk(text, title).forEach(t => chunks.push({ title, text: t }));
     }
     currentText = '';
   }
@@ -27,7 +33,11 @@ function parseAndChunk(markdownText, filename) {
   for (const token of tokens) {
     if (token.type === 'heading') {
       flushChunk();
-      currentTitle = token.text;
+      // 同層或較淺的標題出現 → 截斷堆疊再壓入（跳層按實際 depth 放，不補洞）
+      while (headingStack.length && headingStack[headingStack.length - 1].depth >= token.depth) {
+        headingStack.pop();
+      }
+      headingStack.push({ depth: token.depth, text: token.text });
     } else if (token.type === 'space') {
       currentText += '\n';
     } else if (token.raw) {
@@ -73,7 +83,8 @@ async function embedAndStore(rawChunks, { docId, projectId, phase }, adapter, st
   const embeddedChunks = [];
   for (let i = 0; i < rawChunks.length; i += EMBED_BATCH_SIZE) {
     const batch = rawChunks.slice(i, i + EMBED_BATCH_SIZE);
-    const embeddings = await adapter.embedBatch(batch.map(c => c.text));
+    // embedding 輸入含章節路徑 title：標題脈絡參與語意比對（DB 的 content 仍為純內文）
+    const embeddings = await adapter.embedBatch(batch.map(c => (c.title ? `${c.title}\n${c.text}` : c.text)));
     batch.forEach((chunk, j) => {
       embeddedChunks.push({ docId, title: chunk.title, text: chunk.text, embedding: embeddings[j], projectId, phase });
     });

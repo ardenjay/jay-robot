@@ -40,6 +40,15 @@ function buildFtsQuery(text) {
 
 const RRF_K = 60; // Reciprocal Rank Fusion 常數，文獻慣用值
 
+// FTS 索引定義版本（PRAGMA user_version）：定義變更時 bump，啟動即一次性整表重建。
+// v2：content_seg 由「title + 內文」組成，標題詞（章節路徑）可被關鍵字命中。
+const FTS_VERSION = 2;
+
+// FTS 索引文本：標題（章節路徑）+ 內文
+function ftsText(title, content) {
+  return title ? `${title}\n${content}` : content;
+}
+
 function cosineSimilarity(a, b) {
   // 維度不符（如換了 embedding provider 沒重新 ingest）會算出無意義分數，直接視為不相似
   if (a.length !== b.length) return null;
@@ -98,10 +107,18 @@ class SqliteVectorAdapter extends VectorAdapter {
         );
       `);
       this.ftsEnabled = true;
-      // backfill：舊 DB（無 FTS）或先前寫入不同步（筆數不符）→ 整表重建
-      const nChunks = this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get().c;
-      const nFts = this.db.prepare('SELECT COUNT(*) AS c FROM chunks_fts').get().c;
-      if (nChunks !== nFts) this._rebuildFts();
+      // 索引定義版本落後（如 v2 起 content_seg 含 title）→ 一次性整表重建，
+      // 既有 chunks 的 title 一併納入索引（舊資料不重灌也受益）
+      const ver = this.db.pragma('user_version', { simple: true });
+      if (ver < FTS_VERSION) {
+        this._rebuildFts();
+        this.db.pragma(`user_version = ${FTS_VERSION}`);
+      } else {
+        // backfill：舊 DB（無 FTS）或先前寫入不同步（筆數不符）→ 整表重建
+        const nChunks = this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get().c;
+        const nFts = this.db.prepare('SELECT COUNT(*) AS c FROM chunks_fts').get().c;
+        if (nChunks !== nFts) this._rebuildFts();
+      }
     } catch (err) {
       console.warn(`[vector] FTS5 不可用，keyword 搜尋停用（hybridSearch 退回純向量）：${err.message}`);
     }
@@ -114,9 +131,9 @@ class SqliteVectorAdapter extends VectorAdapter {
   _rebuildFts() {
     const rebuild = this.db.transaction(() => {
       this.db.prepare('DELETE FROM chunks_fts').run();
-      const rows = this.db.prepare('SELECT id, doc_id, content, project_id FROM chunks').all();
+      const rows = this.db.prepare('SELECT id, doc_id, title, content, project_id FROM chunks').all();
       const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)');
-      for (const r of rows) ins.run(segmentForFts(r.content), r.id, r.doc_id, r.project_id);
+      for (const r of rows) ins.run(segmentForFts(ftsText(r.title, r.content)), r.id, r.doc_id, r.project_id);
     });
     rebuild();
   }
@@ -139,8 +156,8 @@ class SqliteVectorAdapter extends VectorAdapter {
           projectId,
           chunk.phase || ''
         );
-        // FTS 與 chunks 同一交易寫入，維持兩表同步
-        if (insFts) insFts.run(segmentForFts(chunk.text), r.lastInsertRowid, chunk.docId, projectId);
+        // FTS 與 chunks 同一交易寫入，維持兩表同步（索引文本含 title，見 ftsText）
+        if (insFts) insFts.run(segmentForFts(ftsText(chunk.title, chunk.text)), r.lastInsertRowid, chunk.docId, projectId);
       }
     });
     insertMany(chunks);
