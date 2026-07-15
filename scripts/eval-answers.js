@@ -5,10 +5,14 @@
 // 安全：絕不碰真實 data/rag.db——把 DB 複製到 temp 沙箱、netlist 以唯讀 symlink 掛入，
 // cwd 切到沙箱後才載入 retrieval（vector/llm 單例以 require 當下的 cwd 定位資料）。
 //
-// 用法：node scripts/eval-answers.js [--project 100T] [--case "soc"]
+// 用法：node scripts/eval-answers.js [--project 100T] [--case "soc"] [--smoke]
 //   --project  專案名稱（預設 100T）
 //   --case     只跑問題文字含此字串的 case
-// 評測項目定義在 evals/answer-cases.json；knownFail: true 的 case 失敗不影響 exit code。
+//   --smoke    只跑標記 smoke:true 的案例（快速子集，供每次改動後手動驗證用）
+//
+// 案例定義：優先讀 evals/answer-cases.local.json（gitignored，含真實客戶專案資料，不進公開 repo）；
+// 不存在則退回 evals/answer-cases.json（公開 repo 版，只放不涉密的示範案例）。
+// knownFail: true 的 case 失敗不影響 exit code。
 
 const os = require('os');
 const fs = require('fs');
@@ -20,6 +24,7 @@ const { values } = parseArgs({
   options: {
     project: { type: 'string', default: '100T' },
     case: { type: 'string' },
+    smoke: { type: 'boolean', default: false },
   },
 });
 
@@ -61,9 +66,12 @@ async function runCase(c, projectId) {
     process.exit(2);
   }
 
-  let cases = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'evals', 'answer-cases.json'), 'utf-8'));
+  const localCasesPath = path.join(REPO_ROOT, 'evals', 'answer-cases.local.json');
+  const casesPath = fs.existsSync(localCasesPath) ? localCasesPath : path.join(REPO_ROOT, 'evals', 'answer-cases.json');
+  let cases = JSON.parse(fs.readFileSync(casesPath, 'utf-8'));
+  if (values.smoke) cases = cases.filter(c => c.smoke === true);
   if (values.case) cases = cases.filter(c => c.q.includes(values.case));
-  console.log(`專案:${project.name}｜cases:${cases.length}｜LLM_ADAPTER=${process.env.LLM_ADAPTER}\n`);
+  console.log(`專案:${project.name}｜案例檔:${path.basename(casesPath)}｜cases:${cases.length}${values.smoke ? '（smoke）' : ''}｜LLM_ADAPTER=${process.env.LLM_ADAPTER}\n`);
 
   let hardFail = 0;
   for (const c of cases) {

@@ -7,11 +7,13 @@
   {
     "q": "sensing camera 多少錢",
     "expectAny": ["12,266", "13,702", "386"],
-    "note": "C315 sensing_camera_PO_summary.md 的單價;模型不主動檢索時由強制首輪檢索兜底"
+    "note": "C315 sensing_camera_PO_summary.md 的單價;模型不主動檢索時由強制首輪檢索兜底",
+    "smoke": true
   },
   {
     "q": "100T有幾個 CAN",
     "expectAny": ["2 x CAN", "2x CAN", "2 個 CAN", "2個CAN", "兩個 CAN"],
-    "note": "答案 chunk(C455 UM Features/DS Specifications)的「100T」只在文件名——靠 FTS v3+ 將 docId 納入關鍵字索引才撈得到"
+    "note": "答案 chunk(C455 UM Features/DS Specifications)的「100T」只在文件名——靠 FTS v3+ 將 docId 納入關鍵字索引才撈得到",
+    "smoke": true
   }
 ]

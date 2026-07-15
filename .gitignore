@@ -4,3 +4,4 @@ uploads/
 public/documents/
 incoming/
 .env
+evals/*.local.json
