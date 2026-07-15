@@ -294,4 +294,34 @@ describe('search_documents 檢索路徑（hybrid / fallback）', () => {
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], ['search', [0.1, 0.2], 25, 'p1'], 'rerank 池應大於 TOP_K');
   });
+
+  it('中文查詢 + adapter 有 generate → 原查詢與英文查詢各檢索一次,聯集去重', async () => {
+    const hybridCalls = [];
+    let round = 0;
+    const store = {
+      ...baseStore({ id: 'p1', name: 'P', context: '' }),
+      hybridSearch: async (queryText) => {
+        hybridCalls.push(queryText);
+        // 兩個 variant 各回一個 chunk,其中 id=9 在兩邊都出現(測去重)
+        if (queryText === 'U42 是什麼零件') return [{ id: 1, docId: 'A', title: 'a', text: 'x' }, { id: 9, docId: 'C', title: 'c', text: 'z' }];
+        return [{ id: 9, docId: 'C', title: 'c', text: 'z' }, { id: 2, docId: 'B', title: 'b', text: 'y' }];
+      },
+    };
+    let fnResp;
+    const adapter = {
+      embed: async () => [0.1, 0.2],
+      generate: async () => 'what part is U42', // 英文翻譯
+      chatWithTools: async (contents) => {
+        round++;
+        if (round === 1) return { functionCalls: [{ name: 'search_documents', args: { query: 'U42 是什麼零件' } }], text: null };
+        const fn = contents.find(c => c.role === 'function');
+        if (fn) fnResp = fn.parts[0].functionResponse.response;
+        return { functionCalls: [], text: 'ok' };
+      },
+    };
+    for await (const _ of answer('U42 是什麼零件', 'p1', adapter, store)) {}
+    assert.deepEqual(hybridCalls, ['U42 是什麼零件', 'what part is U42'], '原查詢與英文查詢各檢索一次');
+    // 聯集去重:id 1,9,2（9 只出現一次）
+    assert.deepEqual(fnResp.chunks.map(c => c.docId), ['A', 'C', 'B'], 'round-robin 合併且 id=9 去重一次');
+  });
 });

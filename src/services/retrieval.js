@@ -3,6 +3,7 @@ const vectorStore = require('../adapters/vector');
 const { formatCatalogForPrompt, extractNpdsCode } = require('../config/npds-catalog');
 const netlist = require('./netlist');
 const { rerankChunks } = require('./rerank');
+const { expandQuery } = require('./query-expand');
 
 const TOP_K = 5;
 // hybridSearch/search 先取比 TOP_K 更寬的候選池，再交給 LLM rerank 篩到 TOP_K：
@@ -12,6 +13,9 @@ const TOP_K = 5;
 // RRF 融合裡爛的關鍵字排名（跨語言 #60）拖到融合後 #19–22，需要池夠大才涵蓋得到；
 // 涵蓋到之後 rerank 每次都能把它拉回 top-5 第一。
 const RERANK_POOL_K = 25;
+// 多查詢（原查詢＋英文擴展）合併後的候選上限：兩 variant 最多 50，全丟 rerank 太長、
+// 也稀釋判斷；round-robin 合併後前 30 已涵蓋兩語言最相關者。
+const UNION_CAP = 30;
 const MAX_TOOL_ROUNDS = 6;
 const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
 
@@ -83,10 +87,29 @@ function shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyToo
 // 結果、無視 system prompt 裡的背景（「務必根據工具結果回答」壓過「背景可直接引用」），
 // 把背景塞進工具結果它才會用。
 async function runSearchDocuments(adapter, store, query, projectId, sources, projectContext) {
-  const queryVector = await adapter.embed(query);
-  const pool = typeof store.hybridSearch === 'function'
-    ? await store.hybridSearch(query, queryVector, RERANK_POOL_K, projectId)
-    : await store.search(queryVector, RERANK_POOL_K, projectId);
+  // 跨語言召回：專案文件多為英文，中文查詢對英文 chunk 召回常不足。含 CJK 的查詢
+  // 另產生英文版本，原查詢與英文查詢各自檢索、round-robin 合併去重成候選池（補召回），
+  // rerank 仍以原查詢判定相關性。
+  const variants = await expandQuery(adapter, query);
+  const lists = [];
+  for (const q of variants) {
+    const v = await adapter.embed(q);
+    lists.push(typeof store.hybridSearch === 'function'
+      ? await store.hybridSearch(q, v, RERANK_POOL_K, projectId)
+      : await store.search(v, RERANK_POOL_K, projectId));
+  }
+  const seen = new Set();
+  const pool = [];
+  for (let i = 0; i < RERANK_POOL_K && pool.length < UNION_CAP; i++) {
+    for (const list of lists) {
+      const c = list[i];
+      if (!c) continue;
+      if (c.id != null && seen.has(c.id)) continue; // 依 chunk id 去重（真實 chunk 皆有 id）
+      if (c.id != null) seen.add(c.id);
+      pool.push(c);
+      if (pool.length >= UNION_CAP) break;
+    }
+  }
   const chunks = await rerankChunks(adapter, query, pool, TOP_K);
   for (const c of chunks) {
     sources.set(c.docId, { docId: c.docId, url: `/documents/${projectId}/${encodeURIComponent(c.docId)}` });
