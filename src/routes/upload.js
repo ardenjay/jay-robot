@@ -4,9 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
-const { ingestFile } = require('../services/ingestion');
+const { ingestFile, ingestFolder, phaseFromFolderName } = require('../services/ingestion');
 const { fixLatin1Mojibake } = require('../services/uploadName');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
+const vectorStore = require('../adapters/vector');
 
 const router = express.Router();
 
@@ -160,6 +161,90 @@ router.post('/', blockWhenReadOnly, upload.single('file'), async (req, res) => {
   } finally {
     if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
     res.end();
+  }
+});
+
+// ── 資料夾進料（md + 圖 + PDF）：暫存區重建目錄樹後走既有 ingestFolder，規則與 CLI 一致 ──
+
+// 資料夾內允許的副檔名；其他（.DS_Store、.tmp…）整批報錯（使用者要求「直接報錯」而非靜默略過）
+const FOLDER_ALLOWED_EXTS = new Set(['.md', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg']);
+
+// 多檔上傳：隨機暫存檔名（避免同名互撞），檔數/大小上限防呆誤選巨大資料夾
+const folderUpload = multer({
+  dest: path.join(process.cwd(), 'uploads'),
+  limits: { fileSize: 50 * 1024 * 1024, files: 300 },
+});
+
+router.post('/folder', blockWhenReadOnly, folderUpload.array('files'), async (req, res) => {
+  const files = req.files || [];
+  let tempRoot = null;
+  try {
+    if (!files.length) return res.status(400).json({ error: '請選擇要上傳的資料夾' });
+
+    const projectId = (req.body.project_id || '').trim();
+    if (!projectId) return res.status(400).json({ error: 'project_id 為必填' });
+
+    // paths：與 files 同序的相對路徑（multipart 的 filename 不保證保留路徑）
+    let paths = req.body.paths === undefined ? [] : req.body.paths;
+    if (!Array.isArray(paths)) paths = [paths];
+    paths = paths.map(fixLatin1Mojibake);
+    if (paths.length !== files.length) {
+      return res.status(400).json({ error: 'paths 與 files 數量不一致' });
+    }
+
+    // 路徑防護：不接受絕對路徑、反斜線、空段與 . / ..；且必須含資料夾名一層
+    for (const p of paths) {
+      const segs = p.split('/');
+      if (!p || p.startsWith('/') || p.includes('\\') || segs.length < 2
+          || segs.some(seg => !seg || seg === '.' || seg === '..')) {
+        return res.status(400).json({ error: `無效路徑:${p}` });
+      }
+    }
+    const folderName = paths[0].split('/')[0];
+    if (!paths.every(p => p.split('/')[0] === folderName)) {
+      return res.status(400).json({ error: '所有檔案必須屬於同一個資料夾' });
+    }
+
+    // 副檔名白名單：違規直接報錯並列出檔名
+    const illegal = paths.filter(p => !FOLDER_ALLOWED_EXTS.has(path.extname(p).toLowerCase()));
+    if (illegal.length) {
+      return res.status(400).json({ error: `含不允許的檔案(僅接受 md/pdf/圖檔):${illegal.join('、')}` });
+    }
+
+    // 覆蓋確認：同名 docId 已存在且未帶 overwrite → 409，由前端確認後重送
+    const docId = folderName;
+    const existing = await vectorStore.listDocuments(projectId);
+    if (existing.some(d => d.docId === docId) && req.body.overwrite !== 'true') {
+      return res.status(409).json({ error: `文件「${docId}」已存在,重新上傳將整夾替換`, docId });
+    }
+
+    // phase：下拉優先，否則從資料夾名的 NPDS 代碼推
+    let phase = req.body.phase;
+    if (phase) {
+      if (!VALID_PHASES.has(phase)) return res.status(400).json({ error: 'phase 必須為 C1 至 C7' });
+    } else {
+      phase = phaseFromFolderName(folderName);
+    }
+    if (!phase) return res.status(400).json({ error: '無法從資料夾名推得階段,請選擇 NPDS 階段' });
+
+    // 暫存區重建目錄樹（雙重防護：resolve 後必須仍在 tempRoot 內）
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'folder-upload-'));
+    files.forEach((f, i) => {
+      const dest = path.resolve(tempRoot, paths[i]);
+      if (!dest.startsWith(tempRoot + path.sep)) throw new Error(`無效路徑:${paths[i]}`);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(f.path, dest);
+    });
+
+    // 進料規則（恰好一個 PDF、至少一個 md、wiki-link 圖、整夾持久化、重灌替換）全在 ingestFolder
+    const result = await ingestFolder(path.join(tempRoot, folderName), { projectId, phase });
+    res.json(result);
+  } catch (err) {
+    console.error('Folder upload error:', err);
+    res.status(400).json({ error: err.message });
+  } finally {
+    for (const f of files) { try { fs.unlinkSync(f.path); } catch {} }
+    if (tempRoot) fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
 

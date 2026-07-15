@@ -333,6 +333,13 @@
     #context-status.success { background: #dcfce7; color: #166534; }
     #context-status.error   { background: #fee2e2; color: #991b1b; }
 
+    .or-divider {
+      text-align: center;
+      color: #9ca3af;
+      font-size: 0.78rem;
+      margin-top: 10px;
+    }
+
     .vlm-toggle {
       display: flex;
       align-items: center;
@@ -550,6 +557,9 @@
             啟用 VLM
           </label>
           <button class="upload-btn" id="upload-btn" disabled>上傳</button>
+          <div class="or-divider">— 或 —</div>
+          <input type="file" id="folder-input" webkitdirectory style="display:none">
+          <button class="upload-btn" id="folder-upload-btn" type="button">上傳資料夾（md＋圖＋PDF）</button>
           <div id="upload-status"></div>
           <div id="upload-log"></div>
         </div>
@@ -1051,6 +1061,72 @@
     function setStatus(msg, type) {
       uploadStatus.textContent = msg;
       uploadStatus.className = type;
+    }
+
+    // ── 資料夾上傳（md＋圖＋PDF）：選完即驗 → 上傳；409 → 覆蓋確認後重送 ──
+    const folderInput = document.getElementById('folder-input');
+    const folderUploadBtn = document.getElementById('folder-upload-btn');
+    const FOLDER_EXTS = new Set(['.md', '.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg']);
+    const extOf = name => { const i = name.lastIndexOf('.'); return i < 0 ? '' : name.slice(i).toLowerCase(); };
+
+    folderUploadBtn.addEventListener('click', () => folderInput.click());
+
+    folderInput.addEventListener('change', () => {
+      const files = [...folderInput.files];
+      folderInput.value = ''; // 允許重選同一資料夾
+      if (!files.length) return;
+
+      const rel = f => f.webkitRelativePath || f.name;
+      const folderName = rel(files[0]).split('/')[0];
+
+      // 選完即驗：白名單、頂層恰好一個 PDF、頂層至少一個 md — 不合格直接報錯,不上傳
+      const illegal = files.filter(f => !FOLDER_EXTS.has(extOf(f.name))).map(rel);
+      const topPdf = files.filter(f => rel(f).split('/').length === 2 && extOf(f.name) === '.pdf');
+      const topMd  = files.filter(f => rel(f).split('/').length === 2 && extOf(f.name) === '.md');
+      const problems = [];
+      if (illegal.length) problems.push(`不允許的檔案:${illegal.join('、')}`);
+      if (topPdf.length !== 1) problems.push(`頂層需恰好一個 PDF(目前 ${topPdf.length} 個)`);
+      if (topMd.length === 0) problems.push('頂層需至少一個 .md');
+      if (problems.length) {
+        setStatus(`✗「${folderName}」:${problems.join(';')}`, 'error');
+        return;
+      }
+      uploadFolder(files, folderName, false);
+    });
+
+    async function uploadFolder(files, folderName, overwrite) {
+      if (!currentProjectId) return;
+      folderUploadBtn.disabled = true;
+      setStatus(`上傳資料夾「${folderName}」(${files.length} 檔)...`, 'info');
+      try {
+        const fd = new FormData();
+        for (const f of files) {
+          fd.append('files', f);
+          fd.append('paths', f.webkitRelativePath || f.name);
+        }
+        fd.append('project_id', currentProjectId);
+        const phase = document.getElementById('phase-select').value;
+        if (phase) fd.append('phase', phase);
+        if (overwrite) fd.append('overwrite', 'true');
+
+        const res = await fetch('/api/upload/folder', { method: 'POST', body: fd });
+        const body = await res.json();
+        if (res.status === 409) {
+          folderUploadBtn.disabled = false;
+          if (confirm(`文件「${body.docId}」已存在,將整夾替換,確定?`)) {
+            return uploadFolder(files, folderName, true);
+          }
+          setStatus('已取消上傳', '');
+          return;
+        }
+        if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+        setStatus(`✓ ${body.docId}:${body.chunkCount} 個段落、${body.imageCount} 張圖`, 'success');
+        loadDocTree();
+      } catch (err) {
+        setStatus(`✗ ${err.message}`, 'error');
+      } finally {
+        folderUploadBtn.disabled = false;
+      }
     }
 
     // ── Chat (Task 8.7) ──
