@@ -30,6 +30,10 @@
 - **WHEN** chunk title 為「介面 › 通訊 › CAN」、內文為規格表
 - **THEN** 送給 embedding API 的文本以「介面 › 通訊 › CAN」開頭、換行後接內文;DB 的 `content` 僅存內文
 
+#### Scenario: Re-embed migration uses the same input rule
+- **WHEN** 執行 `scripts/reembed.js` 對既有 chunks 重算向量(免重灌文件的遷移路徑)
+- **THEN** embed 輸入同為「title + 換行 + 內文」,與進料規則一致;執行前自動備份 DB
+
 #### Scenario: Batch embedding and storage
 - **WHEN** 一份文件被切成多個 chunks 並進行 embedding
 - **THEN** 系統分批呼叫批次 embedding(每批多筆),取得的向量與各 chunk 的 metadata 一同寫入 SQLite

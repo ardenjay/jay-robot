@@ -6,7 +6,8 @@
 //   LLM_ADAPTER=ollama node scripts/reembed.js --project <id>   # 只重嵌單一專案
 //   node scripts/reembed.js --db data/rag.db --dry-run    # 只顯示會處理幾筆
 //
-// 執行前會自動備份 DB 檔（rag.db.bak-<timestamp>）。embed 輸入與 ingestion 相同（chunk 原文）。
+// 執行前會自動備份 DB 檔（rag.db.bak-<timestamp>）。embed 輸入與 ingestion 相同
+//（title + 換行 + 內文——標題/章節路徑參與語意比對）。
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
@@ -35,8 +36,8 @@ async function main() {
   db.pragma('journal_mode = WAL');
 
   const rows = values.project
-    ? db.prepare('SELECT id, content FROM chunks WHERE project_id = ? ORDER BY id').all(values.project)
-    : db.prepare('SELECT id, content FROM chunks ORDER BY id').all();
+    ? db.prepare('SELECT id, title, content FROM chunks WHERE project_id = ? ORDER BY id').all(values.project)
+    : db.prepare('SELECT id, title, content FROM chunks ORDER BY id').all();
   if (!rows.length) die(values.project ? `專案 ${values.project} 沒有任何 chunks` : '資料庫沒有任何 chunks');
 
   console.log(`共 ${rows.length} 個 chunks 待重嵌${values.project ? `（專案 ${values.project}）` : ''}`);
@@ -55,7 +56,8 @@ async function main() {
   let done = 0;
   for (let i = 0; i < rows.length; i += EMBED_BATCH_SIZE) {
     const batch = rows.slice(i, i + EMBED_BATCH_SIZE);
-    const embeddings = await adapter.embedBatch(batch.map(r => r.content));
+    // 與 ingestion 的 embedAndStore 同規則：title(章節路徑)+ 內文
+    const embeddings = await adapter.embedBatch(batch.map(r => (r.title ? `${r.title}\n${r.content}` : r.content)));
     updateMany(batch.map((r, j) => [r.id, embeddings[j]]));
     done += batch.length;
     console.log(`  ${done}/${rows.length}`);
