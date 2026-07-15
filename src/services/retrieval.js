@@ -104,10 +104,25 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
   ];
   const sources = new Map();
 
+  let usedAnyTool = false;
+  let forcedSearch = false;
+
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const { functionCalls, text } = await adapter.chatWithTools(contents, tools);
 
     if (!functionCalls.length) {
+      // 程式層防護：小模型（如 qwen3:14b）可能無視「必須先檢索」的 prompt 規則，
+      // 一個工具都沒呼叫就作答。此時系統代跑一次文件檢索、以工具回合塞回歷史，
+      // 讓模型依據檢索結果重答（僅強制一次，避免迴圈）。
+      if (!usedAnyTool && !forcedSearch && hasDocs) {
+        forcedSearch = true;
+        console.log(`[tool] search_documents(forced) ${JSON.stringify({ query: question })}`);
+        yield { type: 'tool', name: 'search_documents', args: { query: question } };
+        const response = await runSearchDocuments(adapter, store, question, projectId, sources);
+        contents.push({ role: 'model', parts: [{ functionCall: { name: 'search_documents', args: { query: question } } }] });
+        contents.push({ role: 'function', parts: [{ functionResponse: { name: 'search_documents', response } }] });
+        continue;
+      }
       const final = text || '';
       yield { type: 'token', value: final };
       yield { type: 'sources', value: final.includes(NO_ANSWER_PHRASE) ? [] : [...sources.values()] };
@@ -115,6 +130,7 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
     }
 
     // 模型要求的工具呼叫回合
+    usedAnyTool = true;
     contents.push({ role: 'model', parts: functionCalls.map(fc => ({ functionCall: { name: fc.name, args: fc.args } })) });
 
     const responseParts = [];

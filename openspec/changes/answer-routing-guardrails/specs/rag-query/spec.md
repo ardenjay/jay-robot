@@ -14,3 +14,18 @@ system prompt SHALL 含以下路由防護指令:(1) 文件內容類問題(規格
 #### Scenario: Off-topic-looking question still gets searched
 - **WHEN** 使用者問「sensing camera 多少錢」,而專案背景描述產品為 Box PC
 - **THEN** LLM 仍先呼叫 search_documents(專案文件含報價單/採購單),從 PO 文件答出價格,而非未經檢索判定與專案無關
+
+### Requirement: Forced first retrieval when the model answers with zero tool calls
+prompt 規則對小模型(如 qwen3:14b)不可靠,系統 SHALL 以程式層防護兜底:專案有文件、且模型未呼叫任何工具就要產生最終回答時,系統 SHALL 代跑一次 `search_documents`(以原始問題為查詢),把結果以工具回合塞回對話歷史,讓模型依檢索結果重答;每個問題 SHALL 最多強制一次(模型重答後仍不用工具則接受其回答,避免迴圈)。強制檢索 SHALL 發送與一般工具呼叫相同的進度事件,其來源 SHALL 計入 sources。
+
+#### Scenario: Zero-tool answer triggers forced search
+- **WHEN** 模型第一輪未呼叫任何工具就回「請提供更詳細的資訊」
+- **THEN** 系統代跑 search_documents(原問題),塞回結果後模型重答;前端看得到該次工具進度事件
+
+#### Scenario: Forced at most once
+- **WHEN** 強制檢索後模型仍不呼叫工具而直接作答
+- **THEN** 系統接受該回答,不再重複強制
+
+#### Scenario: No force when the model already used tools
+- **WHEN** 模型已自行呼叫過 search_documents 或 netlist 工具後產生最終回答
+- **THEN** 系統不追加強制檢索

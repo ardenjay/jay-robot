@@ -72,6 +72,82 @@ describe('retrieval system prompt 注入專案名稱與背景', () => {
   });
 });
 
+describe('強制首輪檢索（模型零工具就作答時的程式層防護）', () => {
+  it('模型未呼叫任何工具就作答 → 系統代跑一次檢索,模型依結果重答', async () => {
+    let round = 0;
+    const searchCalls = [];
+    const adapter = {
+      embed: async () => [0.5],
+      chatWithTools: async (contents) => {
+        round++;
+        if (round === 1) return { functionCalls: [], text: '請提供更詳細的資訊' };
+        // 第二輪:歷史應含被強制塞入的工具回合
+        const hasForced = contents.some(c => c.role === 'function');
+        return { functionCalls: [], text: hasForced ? '依檢索結果作答' : '沒收到檢索結果' };
+      },
+    };
+    const store = {
+      listProjects: async () => [{ id: 'p1', name: 'P', context: '' }],
+      listDocuments: async () => [],
+      isEmpty: () => false,
+      search: async (...a) => { searchCalls.push(a); return [{ docId: 'PO.md', title: 't', text: '單價 13702' }]; },
+    };
+
+    const events = [];
+    for await (const e of answer('sensing camera 多少錢', 'p1', adapter, store)) events.push(e);
+
+    assert.equal(searchCalls.length, 1, '應代跑恰好一次檢索');
+    const toolEvents = events.filter(e => e.type === 'tool');
+    assert.equal(toolEvents.length, 1);
+    assert.equal(toolEvents[0].name, 'search_documents');
+    assert.equal(toolEvents[0].args.query, 'sensing camera 多少錢', '強制檢索應以原問題為查詢');
+    assert.equal(events.find(e => e.type === 'token').value, '依檢索結果作答');
+    const sources = events.find(e => e.type === 'sources').value;
+    assert.deepEqual(sources.map(s => s.docId), ['PO.md'], '強制檢索的來源應列入');
+  });
+
+  it('只強制一次:模型第二輪仍不用工具 → 直接作答,不無限迴圈', async () => {
+    let rounds = 0;
+    const adapter = {
+      embed: async () => [0.5],
+      chatWithTools: async () => { rounds++; return { functionCalls: [], text: '就是不查' }; },
+    };
+    const store = {
+      listProjects: async () => [{ id: 'p1', name: 'P', context: '' }],
+      listDocuments: async () => [],
+      isEmpty: () => false,
+      search: async () => [],
+    };
+    const events = [];
+    for await (const e of answer('hi', 'p1', adapter, store)) events.push(e);
+    assert.equal(rounds, 2, '強制一次後就收工');
+    assert.equal(events.find(e => e.type === 'token').value, '就是不查');
+  });
+
+  it('模型已自行呼叫過工具 → 最終作答不再強制', async () => {
+    let round = 0;
+    const searchCalls = [];
+    const adapter = {
+      embed: async () => [0.5],
+      chatWithTools: async () => {
+        round++;
+        if (round === 1) return { functionCalls: [{ name: 'search_documents', args: { query: 'q' } }], text: null };
+        return { functionCalls: [], text: '答案' };
+      },
+    };
+    const store = {
+      listProjects: async () => [{ id: 'p1', name: 'P', context: '' }],
+      listDocuments: async () => [],
+      isEmpty: () => false,
+      search: async (...a) => { searchCalls.push(a); return []; },
+    };
+    const events = [];
+    for await (const e of answer('q', 'p1', adapter, store)) events.push(e);
+    assert.equal(searchCalls.length, 1, '只有模型自己那次檢索,無強制追加');
+    assert.equal(events.filter(e => e.type === 'tool').length, 1);
+  });
+});
+
 describe('search_documents 檢索路徑（hybrid / fallback）', () => {
   // 第一輪要求 search_documents，第二輪收工，藉此觸發 runSearchDocuments
   function makeToolAdapter() {
