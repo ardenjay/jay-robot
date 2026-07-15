@@ -13,7 +13,11 @@
 
 - [x] 2.1 `public/index.html`:dirty 追蹤 — 未儲存變更時按鈕亮起並提示;儲存成功/剛載入時按鈕鎖定顯示「✓ 已儲存」
 
-## 3. 驗證
+## 3. 評測(regression eval)
+
+- [x] 3.0 `scripts/eval-answers.js` + `evals/answer-cases.json`:代表性問題跑完整管線(DB 沙箱複本 + 真 Ollama)驗證答案關鍵字;`npm run eval`;knownFail 不影響 exit code。首跑:SoC ✅、sensing 價格 ✅、CAN 數 🟡 knownFail
+
+## 4. 驗證
 
 - [x] 3.1 `npm test` 全綠(111)
 - [ ] 3.2 使用者實測:「soc使用哪一顆」「sensing camera 多少錢」重問驗收(重啟實例後)
