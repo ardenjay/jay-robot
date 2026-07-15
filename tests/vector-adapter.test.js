@@ -79,6 +79,38 @@ describe('vector adapter', () => {
     assert.equal(hits[0].docId, 'C455 EAR-100T_UM.docx', '文件名帶 100T 的 chunk 應排前');
   });
 
+  it('同文件內,doc_id 命中不應蓋過內容真正相關的 chunk（BM25 欄位加權）', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    // 補幾筆不相關的 filler chunks(長度接近真實語料的平均值),避免只有 2 筆 chunk 時
+    // avgdl 被兩個極端值主導、長度正規化效應被人為放大,失真地重現/掩蓋真正的問題
+    const filler = Array.from({ length: 8 }, (_, i) => ({
+      docId: `OTHER_DOC_${i}.md`,
+      title: `Section ${i}`,
+      text: `Unrelated hardware spec number ${i}: connector pinout, voltage rails, and mechanical tolerances for a completely different subsystem.`,
+      embedding: makeVec(2 + i),
+      projectId: 'p1',
+    }));
+    await adapter.add([
+      ...filler,
+      // 內容空洞、幾乎沒有真正資訊的 chunk（模擬封面/安裝須知）
+      { docId: 'EAR-100T_DS.pdf', title: 'Cover', text: '。', embedding: makeVec(0), projectId: 'p1' },
+      // 內容長、真正含答案的 chunk
+      {
+        docId: 'EAR-100T_DS.pdf',
+        title: 'Features',
+        text: 'Up to 2070 FP4 TFLOPS of AI compute and 128 GB of memory. 支援多種周邊介面與擴充能力，適用於邊緣運算場景。',
+        embedding: makeVec(1),
+        projectId: 'p1',
+      },
+    ]);
+    // 查詢向量取正交向量(索引 12,跟所有候選的 0~9 都不撞)讓向量腿對所有候選一視同仁；
+    // topK 開夠大(10,candidate window = topK*4)確保 Cover/Features 都進候選池,不被
+    // window 截斷排除,只看關鍵字腿本身的排序表現
+    const hits = await adapter.hybridSearch('EAR-100T 的 AI 運算效能大概多少', makeVec(12), 10, 'p1');
+    assert.equal(hits[0].title, 'Features', '內容真正相關且較長的 chunk 不應被內容空洞的同文件 chunk 壓過');
+  });
+
   it('user_version 落後 → 開啟時 FTS 一次性重建(舊 chunks 的 title 納入索引)', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     // 建一個「舊索引」DB:FTS 只有內文、user_version 歸零
@@ -94,6 +126,34 @@ describe('vector adapter', () => {
     const hits = await a2.hybridSearch('規格', makeVec(5), 1, 'p1');
     assert.equal(hits.length, 1, '重建後標題詞應可命中');
     assert.equal(hits[0].title, 'I/O 規格');
+  });
+
+  it('chunks_fts 為真正的舊 schema(無 doc_seg 欄位)→ 開啟時砍表重建,不炸也不退回純向量', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    // 模擬 v4 以前的實體 schema：chunks_fts 只有 content_seg 一個索引欄位(無 doc_seg)。
+    // FTS5 虛表不支援 ALTER TABLE 加欄位，若只靠 IF NOT EXISTS 會沿用這個舊表結構。
+    const Database = require('better-sqlite3');
+    const raw = new Database(dbPath);
+    raw.exec(`
+      CREATE TABLE chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, doc_id TEXT NOT NULL, title TEXT, content TEXT NOT NULL,
+        embedding TEXT NOT NULL, project_id TEXT DEFAULT 'default', phase TEXT DEFAULT ''
+      );
+      CREATE VIRTUAL TABLE chunks_fts USING fts5(
+        content_seg, chunk_id UNINDEXED, doc_id UNINDEXED, project_id UNINDEXED
+      );
+    `);
+    raw.prepare('INSERT INTO chunks (doc_id, title, content, embedding, project_id) VALUES (?, ?, ?, ?, ?)')
+      .run('C455 EAR-100T_UM.docx', 'Features', 'Supports 2 x CAN bus', JSON.stringify(makeVec(0)), 'p1');
+    raw.exec("INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) SELECT lower(title || ' ' || content), id, doc_id, project_id FROM chunks");
+    raw.pragma('user_version = 0');
+    raw.close();
+
+    const adapter = new SqliteVectorAdapter(dbPath);
+    assert.equal(adapter.ftsEnabled, true, '砍表重建成功,不應退回純向量模式');
+    const hits = await adapter.hybridSearch('100T 有幾個 CAN', makeVec(5), 1, 'p1');
+    assert.equal(hits.length, 1, '重建後仍可靠文件名關鍵字命中');
+    assert.equal(hits[0].docId, 'C455 EAR-100T_UM.docx');
   });
 
   it('renameDocument:chunks 與 FTS 一體更新,新檔名詞可搜、舊檔名詞不再命中', async () => {

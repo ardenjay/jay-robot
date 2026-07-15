@@ -47,11 +47,20 @@ const RRF_K = 60; // Reciprocal Rank Fusion 常數，文獻慣用值
 //     內文碰巧含該詞的無關 chunks。
 // v4：定義同 v3。實際部署曾在 v3 改版「改到一半」時重啟（版本號已是 3、取值行還是舊的），
 //     導致 v2 內容掛上 v3 版本戳、之後永遠跳過重建；bump 一版強制重建修復。
-const FTS_VERSION = 4;
+// v5：doc_id 拆到獨立的 doc_seg 欄位（原本跟 title+content 混在同一個 content_seg）。
+//     副作用：BM25 依「這一列總長度」正規化分數，內容短的 chunk（如封面/安裝須知）
+//     因 doc_id 占其總字數比例高，查詢含專案代號時分數被灌爆，蓋過內容真正相關但
+//     字數多的 chunk（實測「EAR-100T 的 AI 運算效能大概多少?」答案 chunk 排名第5）。
+//     拆欄位後用 bm25(chunks_fts, 1.0, 0.3) 讓 doc_id 命中打折，不再蓋過內容相關性。
+const FTS_VERSION = 5;
 
-// FTS 索引文本：文件名 + 標題（章節路徑）+ 內文
-function ftsText(docId, title, content) {
-  return [docId, title, content].filter(Boolean).join('\n');
+// FTS 索引文本：content_seg（標題章節路徑 + 內文）與 doc_seg（文件名）分開，
+// 讓 BM25 可以個別加權，doc_id 命中不再因為短 chunk 而蓋過內容本身的相關性。
+function ftsContentSeg(title, content) {
+  return [title, content].filter(Boolean).join('\n');
+}
+function ftsDocSeg(docId) {
+  return docId || '';
 }
 
 function cosineSimilarity(a, b) {
@@ -105,16 +114,22 @@ class SqliteVectorAdapter extends VectorAdapter {
     // 全文索引（keyword search 用）：FTS5 不可用時降級為純向量模式，不讓服務掛掉
     this.ftsEnabled = false;
     try {
+      const ver = this.db.pragma('user_version', { simple: true });
+      // FTS5 虛表不支援 ALTER TABLE 加欄位；版本落後代表欄位定義可能已變(如 v5 新增
+      // doc_seg)，此時單靠 IF NOT EXISTS 會沿用舊表結構、新欄位寫入必炸——先砍表
+      // 再照目前定義重建，才能保證表結構跟 FTS_VERSION 同步。
+      if (ver < FTS_VERSION) {
+        this.db.exec(`DROP TABLE IF EXISTS chunks_fts;`);
+      }
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-          content_seg,
+          content_seg, doc_seg,
           chunk_id UNINDEXED, doc_id UNINDEXED, project_id UNINDEXED
         );
       `);
       this.ftsEnabled = true;
       // 索引定義版本落後（如 v2 起 content_seg 含 title）→ 一次性整表重建，
       // 既有 chunks 的 title 一併納入索引（舊資料不重灌也受益）
-      const ver = this.db.pragma('user_version', { simple: true });
       if (ver < FTS_VERSION) {
         this._rebuildFts();
         this.db.pragma(`user_version = ${FTS_VERSION}`);
@@ -137,8 +152,10 @@ class SqliteVectorAdapter extends VectorAdapter {
     const rebuild = this.db.transaction(() => {
       this.db.prepare('DELETE FROM chunks_fts').run();
       const rows = this.db.prepare('SELECT id, doc_id, title, content, project_id FROM chunks').all();
-      const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)');
-      for (const r of rows) ins.run(segmentForFts(ftsText(r.doc_id, r.title, r.content)), r.id, r.doc_id, r.project_id);
+      const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, doc_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?, ?)');
+      for (const r of rows) {
+        ins.run(segmentForFts(ftsContentSeg(r.title, r.content)), segmentForFts(ftsDocSeg(r.doc_id)), r.id, r.doc_id, r.project_id);
+      }
     });
     rebuild();
   }
@@ -148,7 +165,7 @@ class SqliteVectorAdapter extends VectorAdapter {
       'INSERT INTO chunks (doc_id, title, content, embedding, project_id, phase) VALUES (?, ?, ?, ?, ?, ?)'
     );
     const insFts = this.ftsEnabled
-      ? this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)')
+      ? this.db.prepare('INSERT INTO chunks_fts (content_seg, doc_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?, ?)')
       : null;
     const insertMany = this.db.transaction(rows => {
       for (const chunk of rows) {
@@ -161,8 +178,16 @@ class SqliteVectorAdapter extends VectorAdapter {
           projectId,
           chunk.phase || ''
         );
-        // FTS 與 chunks 同一交易寫入，維持兩表同步（索引文本含 title，見 ftsText）
-        if (insFts) insFts.run(segmentForFts(ftsText(chunk.docId, chunk.title, chunk.text)), r.lastInsertRowid, chunk.docId, projectId);
+        // FTS 與 chunks 同一交易寫入，維持兩表同步（content_seg/doc_seg 分開，見 ftsContentSeg/ftsDocSeg）
+        if (insFts) {
+          insFts.run(
+            segmentForFts(ftsContentSeg(chunk.title, chunk.text)),
+            segmentForFts(ftsDocSeg(chunk.docId)),
+            r.lastInsertRowid,
+            chunk.docId,
+            projectId
+          );
+        }
       }
     });
     insertMany(chunks);
@@ -197,16 +222,18 @@ class SqliteVectorAdapter extends VectorAdapter {
     }));
   }
 
-  // BM25 keyword search：回傳排名好的 chunk_id 陣列（rank 越前越相關）
+  // BM25 keyword search：回傳排名好的 chunk_id 陣列（rank 越前越相關）。
+  // 用欄位加權 bm25(chunks_fts, content_seg權重, doc_seg權重)取代預設 rank：
+  // doc_id 命中打折，避免內容空洞的 chunk 因文件名匹配蓋過內容真正相關的 chunk。
   _keywordSearch(queryText, limit, projectId) {
     const q = buildFtsQuery(queryText);
     if (!q) return [];
     const rows = projectId
       ? this.db.prepare(
-          'SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ? AND project_id = ? ORDER BY rank LIMIT ?'
+          'SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ? AND project_id = ? ORDER BY bm25(chunks_fts, 1.0, 0.3) LIMIT ?'
         ).all(q, projectId, limit)
       : this.db.prepare(
-          'SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?'
+          'SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts, 1.0, 0.3) LIMIT ?'
         ).all(q, limit);
     return rows.map(r => r.chunk_id);
   }
@@ -273,8 +300,10 @@ class SqliteVectorAdapter extends VectorAdapter {
         const rows = this.db
           .prepare('SELECT id, doc_id, title, content, project_id FROM chunks WHERE doc_id = ? AND project_id = ?')
           .all(newDocId, projectId);
-        const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?)');
-        for (const row of rows) ins.run(segmentForFts(ftsText(row.doc_id, row.title, row.content)), row.id, row.doc_id, row.project_id);
+        const ins = this.db.prepare('INSERT INTO chunks_fts (content_seg, doc_seg, chunk_id, doc_id, project_id) VALUES (?, ?, ?, ?, ?)');
+        for (const row of rows) {
+          ins.run(segmentForFts(ftsContentSeg(row.title, row.content)), segmentForFts(ftsDocSeg(row.doc_id)), row.id, row.doc_id, row.project_id);
+        }
       }
       return r.changes;
     });
