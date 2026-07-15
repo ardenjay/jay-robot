@@ -15,7 +15,7 @@
 
 ## 3. 評測(regression eval)
 
-- [x] 3.0 `scripts/eval-answers.js` + `evals/answer-cases.json`:代表性問題跑完整管線(DB 沙箱複本 + 真 Ollama)驗證答案關鍵字;`npm run eval`;knownFail 不影響 exit code。首跑:SoC ✅、sensing 價格 ✅、CAN 數 🟡 knownFail
+- [x] 3.0 `scripts/eval-answers.js` + `evals/answer-cases.json`:代表性問題跑完整管線(DB 沙箱複本 + 真 Ollama)驗證答案關鍵字;`npm run eval`;knownFail 不影響 exit code。cases:SoC、sensing 價格(CAN 數依使用者要求不列入)
 
 ## 4. 驗證
 

@@ -8,11 +8,5 @@
     "q": "sensing camera 多少錢",
     "expectAny": ["12,266", "13,702", "386"],
     "note": "C315 sensing_camera_PO_summary.md 的單價;模型不主動檢索時由強制首輪檢索兜底"
-  },
-  {
-    "q": "100T 有幾個 CAN",
-    "expectAny": ["2 個 CAN", "2個CAN", "兩個 CAN", "2 x CAN", "2× CAN"],
-    "knownFail": true,
-    "note": "檢索未命中含「2 個 CAN bus」的 chunk;專案背景補 I/O 清單後應轉綠"
   }
 ]
