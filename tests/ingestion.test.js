@@ -5,7 +5,7 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const SqliteVectorAdapter = require('../src/adapters/vector/sqlite');
-const { ingestFile } = require('../src/services/ingestion');
+const { ingestFile, parseAndChunk } = require('../src/services/ingestion');
 
 function tmpPath(ext) {
   return path.join(os.tmpdir(), `rag-test-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
@@ -85,5 +85,32 @@ describe('ingestion pipeline', () => {
     assert.ok(titles.includes('新章節一'));
     assert.ok(titles.includes('新章節一 › 新章節二'), 'title 為完整章節路徑');
     assert.ok(!titles.includes('舊章節'), '舊章節不應存在');
+  });
+
+  it('docx alt-text 免責聲明被剝除，圖片語法保留', () => {
+    const md = `# Pin Assignment\n\n![一張含有 文字, 數字, 字型的圖片  AI 產生的內容可能不正確。](data:image/png;base64,AAA)\n\n其他正文內容。`;
+    const [chunk] = parseAndChunk(md, 'test.docx');
+    assert.ok(!chunk.text.includes('AI 產生的內容可能不正確'), '免責聲明不應出現在 chunk 內容');
+    assert.ok(chunk.text.includes('![一張含有 文字, 數字, 字型的圖片](data:image/png;base64,AAA)'), '圖片語法應保留');
+    assert.ok(chunk.text.includes('其他正文內容。'), '其他正文不受影響');
+  });
+
+  it('同一 chunk 含多張圖片、免責聲明重複多次，全部移除', () => {
+    const md = [
+      '# Connectors',
+      '![圖1  AI 產生的內容可能不正確。](data:image/png;base64,A)',
+      '![圖2  AI 產生的內容可能不正確。](data:image/png;base64,B)',
+      '![圖3  AI 產生的內容可能不正確。](data:image/png;base64,C)',
+    ].join('\n\n');
+    const [chunk] = parseAndChunk(md, 'test.docx');
+    assert.equal((chunk.text.match(/AI 產生的內容可能不正確/g) || []).length, 0, '重複出現的免責聲明應全部移除');
+    assert.ok(chunk.text.includes('圖1') && chunk.text.includes('圖2') && chunk.text.includes('圖3'), '其他描述文字保留');
+  });
+
+  it('alt-text 只有樣板文字、沒有其他描述時同樣正確移除', () => {
+    const md = `# Cover\n\n![AI 產生的內容可能不正確。](data:image/png;base64,A)`;
+    const [chunk] = parseAndChunk(md, 'test.docx');
+    assert.ok(!chunk.text.includes('AI 產生的內容可能不正確'));
+    assert.ok(chunk.text.includes('![](data:image/png;base64,A)'), '圖片語法本身應保留（alt 文字清空）');
   });
 });
