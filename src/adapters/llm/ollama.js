@@ -3,8 +3,12 @@ const LLMAdapter = require('./base');
 const DEFAULT_BASE_URL = 'http://localhost:11434';
 const DEFAULT_GEN_MODEL = 'qwen3:14b';
 const DEFAULT_EMBED_MODEL = 'bge-m3';
-// 低 temperature：與 Gemini adapter 同準則，RAG 任務要忠於文件、回答一致
-const GEN_TEMPERATURE = 0.2;
+// temperature 0（greedy）：工具迴圈 + 小模型（qwen3:14b）在 0.2 仍會同題不同解——
+// 有時讀到 prompt 開頭的專案背景、有時忽略。改 0 讓同樣輸入永遠同樣輸出，行為可調試；
+// 需要多樣性時以 OLLAMA_TEMPERATURE 覆寫。
+const GEN_TEMPERATURE = process.env.OLLAMA_TEMPERATURE !== undefined
+  ? parseFloat(process.env.OLLAMA_TEMPERATURE)
+  : 0;
 // Ollama 執行期預設 num_ctx 僅 4096，遠小於模型上限；system prompt（含 NPDS 目錄）+ 工具宣告
 // 就會超過，Ollama 會「從前面靜默截斷」——等於砍掉 system 指令與工具，模型開始亂答。
 const DEFAULT_NUM_CTX = 16384;
