@@ -5,6 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const { ingestFile } = require('../services/ingestion');
+const { fixLatin1Mojibake } = require('../services/uploadName');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
 
 const router = express.Router();
@@ -18,7 +19,12 @@ const MARKITDOWN_EXTS = new Set([
 
 const storage = multer.diskStorage({
   destination: path.join(process.cwd(), 'uploads'),
-  filename: (req, file, cb) => cb(null, file.originalname),
+  // multer 1.x 把 UTF-8 filename 當 latin1 解，中文/全形檔名變 mojibake；
+  // 在此就地修正 originalname，下游（docId、持久化、下載、訊息）一次全對。
+  filename: (req, file, cb) => {
+    file.originalname = fixLatin1Mojibake(file.originalname);
+    cb(null, file.originalname);
+  },
 });
 
 const upload = multer({ storage });
