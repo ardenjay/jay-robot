@@ -718,28 +718,43 @@
 
     backBtn.addEventListener('click', () => { location.hash = '#/'; });
 
-    // ── 專案設定：儲存背景說明 ──
-    document.getElementById('save-context-btn').addEventListener('click', async () => {
+    // ── 專案設定：儲存背景說明（追蹤未儲存變更，讓儲存狀態一目瞭然） ──
+    let savedProjectContext = '';   // 伺服器上已存的值；與輸入框比對得知是否有未儲存變更
+    const contextInput = document.getElementById('project-context-input');
+    const contextSaveBtn = document.getElementById('save-context-btn');
+    const contextStatus = document.getElementById('context-status');
+
+    function refreshContextSaveState() {
+      const dirty = contextInput.value !== savedProjectContext;
+      contextSaveBtn.disabled = !dirty;
+      contextSaveBtn.textContent = dirty ? '儲存' : '✓ 已儲存';
+      if (dirty) {
+        contextStatus.textContent = '有未儲存的變更';
+        contextStatus.className = '';
+      }
+    }
+    contextInput.addEventListener('input', refreshContextSaveState);
+
+    contextSaveBtn.addEventListener('click', async () => {
       if (!currentProjectId) return;
-      const btn = document.getElementById('save-context-btn');
-      const status = document.getElementById('context-status');
-      btn.disabled = true;
+      const value = contextInput.value;
+      contextSaveBtn.disabled = true;
       try {
         const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ context: document.getElementById('project-context-input').value }),
+          body: JSON.stringify({ context: value }),
         });
         const body = await res.json();
         if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-        status.textContent = '✓ 已儲存';
-        status.className = 'success';
+        savedProjectContext = value;
+        contextStatus.textContent = '✓ 已儲存';
+        contextStatus.className = 'success';
       } catch (err) {
-        status.textContent = '儲存失敗：' + err.message;
-        status.className = 'error';
-      } finally {
-        btn.disabled = false;
+        contextStatus.textContent = '儲存失敗：' + err.message;
+        contextStatus.className = 'error';
       }
+      refreshContextSaveState();
     });
 
     // ── View: Project detail ──
@@ -756,10 +771,12 @@
         const projects = await res.json();
         const p = projects.find(x => x.id === projectId);
         headerTitle.textContent = p ? `🤖 ${p.name}` : '🤖 Jay Robot';
-        document.getElementById('project-context-input').value = (p && p.context) || '';
+        savedProjectContext = (p && p.context) || '';
+        contextInput.value = savedProjectContext;
       } catch {}
-      document.getElementById('context-status').textContent = '';
-      document.getElementById('context-status').className = '';
+      contextStatus.textContent = '';
+      contextStatus.className = '';
+      refreshContextSaveState();
 
       // Reset chat
       document.getElementById('messages').innerHTML = `
