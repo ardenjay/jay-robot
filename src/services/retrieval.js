@@ -17,6 +17,30 @@ const RERANK_POOL_K = 25;
 // 也稀釋判斷；round-robin 合併後前 30 已涵蓋兩語言最相關者。
 const UNION_CAP = 30;
 const MAX_TOOL_ROUNDS = 6;
+// Sidecar 表格列的有界注入（見 document-retrieval spec: Bounded table-row injection）：
+// 密集規格/pin 表的單屬性查詢對整表 chunk 相似度被稀釋、進不了主池（spec-table-recall-
+// dilution）。修法：ingestion 把大表每列另存 table_rows（不進主池），檢索時只在
+// 「列相似度 ≥ 門檻」時取前 ≤2 列「附加」進候選池，主池分毫不動——門檻即 router、
+// 上限即保險絲，rerank 當守門員。門檻 0.60 由探測定（probe3：正解列 0.64–0.72，
+// 無關查詢噪音多在 0.43–0.55）。前案「拆列進主池」無界競爭淨負已否決（openspec archive）。
+const ROW_SIM_FLOOR = parseFloat(process.env.ROW_SIM_FLOOR || '0.60');
+const MAX_ROW_INJECT = parseInt(process.env.MAX_ROW_INJECT || '2', 10);
+
+// 字面加成：embedding 分不出「pin 1」與「pin 5」（數字語意太弱），查詢裡的數字/短英數
+// token（IP、J105）若與列首格吻合（數字須全等、字母 token 為包含），該列在過門檻的候選中
+// 優先注入。純 reorder：不放寬門檻、不增加注入數。
+function boostRowsByFirstCell(query, rows) {
+  const nums = query.match(/\d+/g) || [];
+  const words = (query.match(/[A-Za-z][A-Za-z0-9_-]+/g) || []).map(w => w.toLowerCase());
+  const hit = (r) => {
+    const fc = String(r.firstCell || '').trim();
+    if (!fc) return 0;
+    if (nums.includes(fc)) return 1;
+    const fcl = fc.toLowerCase();
+    return words.some(w => fcl.includes(w)) ? 1 : 0;
+  };
+  return [...rows].sort((a, b) => hit(b) - hit(a) || b.similarity - a.similarity);
+}
 const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
 // 放棄語前綴：NO_ANSWER_PHRASE 的共同前綴。模型放棄時常改寫尾巴（「…找到與X相關的資訊」），
 // 用前綴才抓得到這些變體；仍是系統指定放棄語的一部分，誤中正常答案的機率低。
@@ -95,8 +119,10 @@ async function runSearchDocuments(adapter, store, query, projectId, sources, pro
   // rerank 仍以原查詢判定相關性，但 snippet 開窗用全部變體（補英文表格的答案可見性）。
   const variants = await expandQuery(adapter, query);
   const lists = [];
+  const queryVectors = []; // 留給 sidecar 表格列注入複用（零額外 embed 成本）
   for (const q of variants) {
     const v = await adapter.embed(q);
+    queryVectors.push(v);
     lists.push(typeof store.hybridSearch === 'function'
       ? await store.hybridSearch(q, v, RERANK_POOL_K, projectId)
       : await store.search(v, RERANK_POOL_K, projectId));
@@ -113,6 +139,25 @@ async function runSearchDocuments(adapter, store, query, projectId, sources, pro
       if (pool.length >= UNION_CAP) break;
     }
   }
+  // Sidecar 表格列有界注入：各 variant 向量查 table_rows（跨 variant 同列取最高分），
+  // 過門檻者經字面加成排序後取前 ≤2「附加」進池（主池候選一個不少）。
+  // fetch 數取 50：正解 pin 列在列索引純向量排名可到 20~30 名，字面加成要看得到才救得起。
+  if (typeof store.searchTableRows === 'function') {
+    const rowCands = new Map();
+    for (const v of queryVectors) {
+      for (const r of await store.searchTableRows(v, 50, projectId)) {
+        const prev = rowCands.get(r.id);
+        if (!prev || r.similarity > prev.similarity) rowCands.set(r.id, r);
+      }
+    }
+    const passed = [...rowCands.values()].filter(r => r.similarity >= ROW_SIM_FLOOR);
+    for (const r of boostRowsByFirstCell(query, passed).slice(0, MAX_ROW_INJECT)) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      pool.push({ id: r.id, docId: r.docId, title: r.title, text: r.text, distance: 1 - r.similarity });
+    }
+  }
+
   // rerank 以原查詢判定相關性；snippet 開窗改用全部變體（含英文版），補跨語言可見性缺口
   const chunks = await rerankChunks(adapter, query, pool, TOP_K, variants);
   for (const c of chunks) {
@@ -219,4 +264,4 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
   yield { type: 'sources', value: [] };
 }
 
-module.exports = { answer, shouldForceDocSearch };
+module.exports = { answer, shouldForceDocSearch, boostRowsByFirstCell };

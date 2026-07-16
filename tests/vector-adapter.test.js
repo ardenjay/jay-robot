@@ -38,6 +38,28 @@ describe('vector adapter', () => {
     assert.equal(results[0].title, 'A', '最相似的應該是 A');
   });
 
+  it('sidecar table_rows: add/search/clear，id 帶 tr 前綴不與 chunks 相撞', async () => {
+    const dbPath = tmpDb(); dbs.push(dbPath);
+    const adapter = new SqliteVectorAdapter(dbPath);
+    await adapter._ready;
+
+    await adapter.addTableRows([
+      { docId: 'doc.md', title: '規格 › Table 25', text: 'Weight | 98 | gram', firstCell: 'Weight', embedding: makeVec(0), projectId: 'p1' },
+      { docId: 'doc.md', title: '規格 › Table 25', text: 'Height | 36.8 | mm', firstCell: 'Height', embedding: makeVec(1), projectId: 'p1' },
+    ]);
+
+    const hits = await adapter.searchTableRows(makeVec(0), 2, 'p1');
+    assert.equal(hits.length, 2);
+    assert.ok(hits[0].text.includes('Weight'), '最相似列排前');
+    assert.ok(String(hits[0].id).startsWith('tr'), 'id 有 tr 前綴');
+    assert.equal(hits[0].firstCell, 'Weight');
+    assert.ok(hits[0].similarity > hits[1].similarity);
+
+    // clear 同步清列
+    await adapter.clear('doc.md', 'p1');
+    assert.equal((await adapter.searchTableRows(makeVec(0), 5, 'p1')).length, 0);
+  });
+
   it('clear 後 isEmpty 為 true，search 回傳空陣列', async () => {
     const dbPath = tmpDb(); dbs.push(dbPath);
     const adapter = new SqliteVectorAdapter(dbPath);

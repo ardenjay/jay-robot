@@ -111,6 +111,22 @@ class SqliteVectorAdapter extends VectorAdapter {
     try { this.db.exec(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
     try { this.db.exec(`ALTER TABLE projects ADD COLUMN context TEXT NOT NULL DEFAULT ''`); } catch {}
 
+    // Sidecar 表格列索引：大表的每一 body 列（帶表頭與章節/caption 脈絡）獨立存放，
+    // 不進 chunks、不進 FTS——只在檢索時以相似度門檻限量注入 rerank 候選池
+    // （見 document-retrieval spec: Bounded table-row injection）。first_cell 供
+    // 「查詢含 pin 編號/屬性名 對 列首格」的字面加成，救 embedding 分不出數字的查詢。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS table_rows (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_id     TEXT NOT NULL,
+        title      TEXT,
+        content    TEXT NOT NULL,
+        first_cell TEXT DEFAULT '',
+        embedding  TEXT NOT NULL,
+        project_id TEXT DEFAULT 'default'
+      );
+    `);
+
     // 全文索引（keyword search 用）：FTS5 不可用時降級為純向量模式，不讓服務掛掉
     this.ftsEnabled = false;
     try {
@@ -191,6 +207,38 @@ class SqliteVectorAdapter extends VectorAdapter {
       }
     });
     insertMany(chunks);
+  }
+
+  // Sidecar 表格列寫入：rows = [{docId, title, text, firstCell, embedding, projectId}]
+  async addTableRows(rows) {
+    const stmt = this.db.prepare(
+      'INSERT INTO table_rows (doc_id, title, content, first_cell, embedding, project_id) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    const insertMany = this.db.transaction(list => {
+      for (const r of list) {
+        stmt.run(r.docId, r.title || '', r.text, r.firstCell || '', JSON.stringify(r.embedding), r.projectId || 'default');
+      }
+    });
+    insertMany(rows);
+  }
+
+  // Sidecar 表格列查詢：純向量比對（列不進 FTS），回傳含 similarity 供檢索端做門檻判定。
+  // id 加 tr 前綴，避免與 chunks 的整數 id 在候選池去重時相撞。
+  async searchTableRows(vector, topK = 5, projectId) {
+    const rows = projectId
+      ? this.db.prepare('SELECT id, doc_id, title, content, first_cell, embedding FROM table_rows WHERE project_id = ?').all(projectId)
+      : this.db.prepare('SELECT id, doc_id, title, content, first_cell, embedding FROM table_rows').all();
+    if (!rows.length) return [];
+    const scored = rows.map(row => ({
+      id: `tr${row.id}`,
+      docId: row.doc_id,
+      title: row.title,
+      text: row.content,
+      firstCell: row.first_cell || '',
+      similarity: cosineSimilarity(vector, JSON.parse(row.embedding)) ?? 0,
+    }));
+    scored.sort((a, b) => b.similarity - a.similarity);
+    return scored.slice(0, topK);
   }
 
   // projectId optional — omit to search all
@@ -278,9 +326,11 @@ class SqliteVectorAdapter extends VectorAdapter {
     const clearBoth = this.db.transaction(() => {
       if (projectId) {
         this.db.prepare('DELETE FROM chunks WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
+        this.db.prepare('DELETE FROM table_rows WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
         if (this.ftsEnabled) this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
       } else {
         this.db.prepare('DELETE FROM chunks WHERE doc_id = ?').run(docId);
+        this.db.prepare('DELETE FROM table_rows WHERE doc_id = ?').run(docId);
         if (this.ftsEnabled) this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ?').run(docId);
       }
     });
@@ -295,6 +345,8 @@ class SqliteVectorAdapter extends VectorAdapter {
       const r = this.db
         .prepare('UPDATE chunks SET doc_id = ? WHERE doc_id = ? AND project_id = ?')
         .run(newDocId, oldDocId, projectId);
+      // sidecar 表格列跟著改名（列 title 不含 docId，改欄位即可）
+      this.db.prepare('UPDATE table_rows SET doc_id = ? WHERE doc_id = ? AND project_id = ?').run(newDocId, oldDocId, projectId);
       if (r.changes > 0 && this.ftsEnabled) {
         this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ? AND project_id = ?').run(oldDocId, projectId);
         const rows = this.db

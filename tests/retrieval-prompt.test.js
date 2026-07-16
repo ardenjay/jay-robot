@@ -9,7 +9,7 @@ process.chdir(fs.mkdtempSync(path.join(os.tmpdir(), 'retrieval-prompt-')));
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { answer, shouldForceDocSearch } = require('../src/services/retrieval');
+const { answer, shouldForceDocSearch, boostRowsByFirstCell } = require('../src/services/retrieval');
 
 // 以假 adapter / 假 store 擷取送給 LLM 的 contents，驗證 system instruction 的注入內容。
 // 不打真實 API、不碰真實 DB。
@@ -332,5 +332,97 @@ describe('search_documents 檢索路徑（hybrid / fallback）', () => {
     assert.deepEqual(hybridCalls, ['U42 是什麼零件', 'what part is U42'], '原查詢與英文查詢各檢索一次');
     // 聯集去重:id 1,9,2（9 只出現一次）
     assert.deepEqual(fnResp.chunks.map(c => c.docId), ['A', 'C', 'B'], 'round-robin 合併且 id=9 去重一次');
+  });
+});
+
+describe('sidecar 表格列有界注入', () => {
+  // 共用 mock：hybrid 回 2 個主池 chunk；searchTableRows 由各測試指定
+  function makeStore(rows) {
+    return {
+      listProjects: async () => [{ id: 'p1', name: 'P', context: '' }],
+      isEmpty: () => false,
+      listDocuments: async () => [],
+      hybridSearch: async () => [
+        { id: 1, docId: 'A', title: 'a', text: '主池甲', distance: 0.3 },
+        { id: 2, docId: 'B', title: 'b', text: '主池乙', distance: 0.4 },
+      ],
+      searchTableRows: async () => rows,
+    };
+  }
+  function makeAdapter(capture) {
+    let round = 0;
+    return {
+      embed: async () => [0.1, 0.2],
+      generate: async () => 'en query',
+      chatWithTools: async (contents) => {
+        round++;
+        if (round === 1) return { functionCalls: [{ name: 'search_documents', args: { query: 'pin1 是什麼' } }], text: null };
+        const fn = contents.find(c => c.role === 'function');
+        if (fn) capture.resp = fn.parts[0].functionResponse.response;
+        return { functionCalls: [], text: 'ok' };
+      },
+    };
+  }
+
+  it('過門檻的列被「附加」進池:主池候選一個不少,列限量 ≤2', async () => {
+    const rows = [
+      { id: 'tr1', docId: 'D', title: 't1', text: 'Pin | 1 | VIN', firstCell: '1', similarity: 0.72 },
+      { id: 'tr2', docId: 'D', title: 't2', text: 'Pin | 2 | GND', firstCell: '2', similarity: 0.70 },
+      { id: 'tr3', docId: 'D', title: 't3', text: 'Pin | 3 | CAN', firstCell: '3', similarity: 0.68 },
+    ];
+    const capture = {};
+    for await (const _ of answer('pin1 是什麼', 'p1', makeAdapter(capture), makeStore(rows))) {}
+    const texts = capture.resp.chunks.map(c => c.text);
+    assert.ok(texts.includes('主池甲') && texts.includes('主池乙'), '主池候選仍在(附加不替換)');
+    const injected = texts.filter(t => t.startsWith('Pin |'));
+    assert.equal(injected.length, 2, '注入上限 2');
+    assert.ok(injected.includes('Pin | 1 | VIN'), '字面加成:firstCell=1 吻合查詢 pin1 優先注入');
+  });
+
+  it('全部列低於門檻 → 一列都不注入,行為與現狀相同', async () => {
+    const rows = [
+      { id: 'tr1', docId: 'D', title: 't1', text: 'Pin | 1 | VIN', firstCell: '1', similarity: 0.55 },
+    ];
+    const capture = {};
+    for await (const _ of answer('pin1 是什麼', 'p1', makeAdapter(capture), makeStore(rows))) {}
+    assert.deepEqual(capture.resp.chunks.map(c => c.text), ['主池甲', '主池乙'], '無注入');
+  });
+
+  it('store 不支援 searchTableRows(舊注入物件)→ 零行為差異', async () => {
+    const store = makeStore([]);
+    delete store.searchTableRows;
+    const capture = {};
+    for await (const _ of answer('pin1 是什麼', 'p1', makeAdapter(capture), store)) {}
+    assert.deepEqual(capture.resp.chunks.map(c => c.text), ['主池甲', '主池乙']);
+  });
+});
+
+describe('boostRowsByFirstCell 字面加成', () => {
+  it('查詢數字與列首格全等者優先;不增列、只重排', () => {
+    const rows = [
+      { firstCell: '13', similarity: 0.70, text: 'pin13' },
+      { firstCell: '3', similarity: 0.65, text: 'pin3' },
+    ];
+    const out = boostRowsByFirstCell('接頭的 pin3、pin4 是什麼?', rows);
+    assert.equal(out[0].text, 'pin3', '首格=3 全等命中,勝過 cos 較高的 13(數字須全等,13≠3)');
+    assert.equal(out.length, 2);
+  });
+
+  it('字母 token 用包含比對(IP ⊂ IP-rating)', () => {
+    const rows = [
+      { firstCell: 'Powerconsumption', similarity: 0.70, text: 'power' },
+      { firstCell: 'IP-rating', similarity: 0.66, text: 'ip' },
+    ];
+    const out = boostRowsByFirstCell('MTi-680G 的 IP 防護等級是多少?', rows);
+    assert.equal(out[0].text, 'ip');
+  });
+
+  it('無吻合時維持 cos 排序', () => {
+    const rows = [
+      { firstCell: 'Height', similarity: 0.66, text: 'h' },
+      { firstCell: 'Weight', similarity: 0.70, text: 'w' },
+    ];
+    const out = boostRowsByFirstCell('重量是多少克?', rows);
+    assert.equal(out[0].text, 'w');
   });
 });

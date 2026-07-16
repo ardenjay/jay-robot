@@ -1,7 +1,7 @@
 require('dotenv').config();
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseAndChunk } = require('../src/services/ingestion');
+const { parseAndChunk, extractTableRows } = require('../src/services/ingestion');
 
 describe('chunker', () => {
   it('多標題文件產生正確 chunk 數量,title 為完整章節路徑', () => {
@@ -83,5 +83,52 @@ describe('chunker', () => {
     const chunks = parseAndChunk(md, 'x.md');
     const last = chunks[chunks.length - 1];
     assert.equal(last.title, '介面 › FAQ › Q1: 問題?');
+  });
+});
+
+describe('sidecar 表格列抽取 (extractTableRows)', () => {
+  const bigTable = `<table>`
+    + `<tr><td></td><td>Min</td><td>Max</td><td>Unit</td></tr>`
+    + `<tr><td>Weight</td><td></td><td>8.9</td><td>gram</td></tr>`
+    + `<tr><td>Height</td><td></td><td>13.0</td><td>mm</td></tr>`
+    + `<tr><td>IP-rating</td><td></td><td>IP68</td><td></td></tr>`
+    + `<tr><td>Width</td><td></td><td>31.5</td><td>mm</td></tr>`
+    + `</table>`;
+
+  it('大表 → 每 body 列一筆,含表頭欄名脈絡與 firstCell', () => {
+    const rows = extractTableRows(`# 規格\n\n${bigTable}`, 'spec.md');
+    assert.equal(rows.length, 4);
+    const weight = rows.find(r => r.text.includes('Weight'));
+    assert.ok(weight.text.includes('8.9') && weight.text.includes('gram'));
+    assert.ok(weight.text.includes('Min') && weight.text.includes('Max'), '列帶表頭欄名');
+    assert.equal(weight.firstCell, 'Weight');
+    assert.equal(weight.title, '規格');
+    assert.ok(!weight.text.includes('Height'), '各列不互相混入');
+  });
+
+  it('表格前的 caption 段落(Table N: ...)併進 title —— 實體標籤', () => {
+    const md = `# 6.2 System specifications\n\nTable 25: System specifications of MTi-680G\n\n${bigTable}`;
+    const rows = extractTableRows(md, 'x.md');
+    assert.ok(rows[0].title.includes('Table 25: System specifications of MTi-680G'), rows[0].title);
+    assert.ok(rows[0].title.includes('6.2 System specifications'), '章節路徑仍在');
+  });
+
+  it('markdown pipe 表也抽列,pin 表 firstCell = pin 編號', () => {
+    const md = `# 腳位\n\n| Pin | Name |\n| --- | --- |\n| 1 | VIN |\n| 2 | GND |\n| 3 | CAN_H |\n| 4 | CAN_L |`;
+    const rows = extractTableRows(md, 'pin.md');
+    assert.equal(rows.length, 4);
+    assert.equal(rows[0].firstCell, '1');
+    assert.ok(rows[0].text.includes('VIN'));
+  });
+
+  it('小表(body ≤ 門檻)不產列', () => {
+    const md = `# 公司\n\n<table><tr><td>Name</td><td>Xsens</td></tr><tr><td>Country</td><td>NL</td></tr></table>`;
+    assert.equal(extractTableRows(md, 'co.md').length, 0);
+  });
+
+  it('主 chunk 切塊行為不受影響:大表仍整張留在段落 chunk 內', () => {
+    const chunks = parseAndChunk(`# 規格\n\n${bigTable}`, 'spec.md');
+    assert.equal(chunks.length, 1, '大表不拆主 chunk');
+    assert.ok(chunks[0].text.includes('Weight') && chunks[0].text.includes('Width'), '整表都在');
   });
 });
