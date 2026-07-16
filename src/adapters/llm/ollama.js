@@ -65,6 +65,12 @@ class OllamaAdapter extends LLMAdapter {
     this.embedModel = opts.embedModel || process.env.OLLAMA_EMBED_MODEL || DEFAULT_EMBED_MODEL;
     this.numCtx = opts.numCtx || parseInt(process.env.OLLAMA_NUM_CTX, 10) || DEFAULT_NUM_CTX;
     this.fetch = opts.fetch || globalThis.fetch;
+    // 請求逾時與瞬斷重試：長跑時本機 Ollama 高負載下偶發連線瞬斷/卡死，adapter 層自癒。
+    this.timeoutMs = opts.timeoutMs || parseInt(process.env.OLLAMA_TIMEOUT_MS, 10) || 120000;
+    this.maxRetries = opts.maxRetries != null ? opts.maxRetries
+      : (process.env.OLLAMA_MAX_RETRIES != null ? parseInt(process.env.OLLAMA_MAX_RETRIES, 10) : 2);
+    this.retryDelayMs = opts.retryDelayMs != null ? opts.retryDelayMs
+      : (process.env.OLLAMA_RETRY_DELAY_MS != null ? parseInt(process.env.OLLAMA_RETRY_DELAY_MS, 10) : 2000);
     console.log(`[Ollama] ${this.baseUrl}｜生成：${this.genModel}｜embedding：${this.embedModel}｜num_ctx：${this.numCtx}`);
   }
 
@@ -89,6 +95,48 @@ class OllamaAdapter extends LLMAdapter {
     return res;
   }
 
+  // 非串流請求：fetch + res.json() 包在同一個 AbortController timeout 內（timeout 涵蓋到取得
+  // 完整 JSON，因生成是在讀 body 時發生，非 fetch resolve 時）。連線瞬斷/逾時/5xx 自動重試，
+  // 4xx（如 model not found）確定性錯誤不重試。重試耗盡拋含 URL + ollama serve 指引的錯誤。
+  async _postJson(path, body) {
+    const attempts = Math.max(1, this.maxRetries + 1);
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const res = await this.fetch(`${this.baseUrl}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          let detail = text;
+          try { detail = JSON.parse(text).error || text; } catch {}
+          const hint = /not found/i.test(detail) ? `（模型未安裝？請執行 ollama pull ${body.model}）` : '';
+          const httpErr = new Error(`Ollama ${path} 回應 ${res.status}：${detail}${hint}`);
+          if (res.status >= 400 && res.status < 500) throw httpErr; // 確定性錯誤，不重試
+          lastErr = httpErr; // 5xx 可重試
+        } else {
+          return await res.json();
+        }
+      } catch (err) {
+        if (err.message && err.message.startsWith('Ollama ')) throw err; // 4xx httpErr，直接往上拋
+        const reason = err.name === 'AbortError' ? `請求逾時（${this.timeoutMs}ms）` : err.message;
+        lastErr = new Error(`無法連線 Ollama（${this.baseUrl}），請確認 ollama serve 已啟動：${reason}`);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (i < attempts - 1) {
+        console.warn(`[Ollama] ${path} 第 ${i + 1} 次失敗，${this.retryDelayMs}ms 後重試：${lastErr.message}`);
+        await new Promise(r => setTimeout(r, this.retryDelayMs));
+      }
+    }
+    throw lastErr;
+  }
+
   async embed(text) {
     const vectors = await this.embedBatch([text]);
     return vectors[0];
@@ -97,8 +145,7 @@ class OllamaAdapter extends LLMAdapter {
   // /api/embed 原生支援批次：input 傳陣列，一次請求回傳同序向量
   async embedBatch(texts) {
     if (texts.length === 0) return [];
-    const res = await this._post('/api/embed', { model: this.embedModel, input: texts });
-    const data = await res.json();
+    const data = await this._postJson('/api/embed', { model: this.embedModel, input: texts });
     return data.embeddings;
   }
 
@@ -113,8 +160,7 @@ class OllamaAdapter extends LLMAdapter {
   }
 
   async generate(prompt) {
-    const res = await this._post('/api/chat', this._chatBody([{ role: 'user', content: prompt }], { stream: false }));
-    const data = await res.json();
+    const data = await this._postJson('/api/chat', this._chatBody([{ role: 'user', content: prompt }], { stream: false }));
     return (data.message && data.message.content) || '';
   }
 
@@ -143,8 +189,7 @@ class OllamaAdapter extends LLMAdapter {
   async chatWithTools(contents, tools) {
     const body = this._chatBody(toOllamaMessages(contents), { stream: false });
     if (tools && tools.length) body.tools = toOllamaTools(tools);
-    const res = await this._post('/api/chat', body);
-    const data = await res.json();
+    const data = await this._postJson('/api/chat', body);
     const msg = data.message || {};
     const calls = msg.tool_calls || [];
     if (calls.length) {

@@ -39,8 +39,8 @@ function ndjsonResponse(lines, splitAt) {
   };
 }
 
-function makeAdapter(fetchImpl) {
-  return new OllamaAdapter({ baseUrl: 'http://test:11434', genModel: 'gen-m', embedModel: 'emb-m', fetch: fetchImpl });
+function makeAdapter(fetchImpl, opts = {}) {
+  return new OllamaAdapter({ baseUrl: 'http://test:11434', genModel: 'gen-m', embedModel: 'emb-m', fetch: fetchImpl, retryDelayMs: 0, ...opts });
 }
 
 describe('OllamaAdapter embedding', () => {
@@ -153,5 +153,65 @@ describe('OllamaAdapter 串流與錯誤', () => {
   it('model not found 時錯誤訊息提示 ollama pull', async () => {
     const fetch = fakeFetch({ ok: false, status: 404, text: async () => JSON.stringify({ error: 'model "gen-m" not found' }) });
     await assert.rejects(() => makeAdapter(fetch).generate('嗨'), /404.*not found.*ollama pull gen-m/);
+  });
+});
+
+describe('OllamaAdapter timeout + 重試', () => {
+  it('連線瞬斷第一次失敗、第二次成功 → 自動重試回成功', async () => {
+    let n = 0;
+    const fetch = async () => {
+      n++;
+      if (n === 1) throw new TypeError('fetch failed');
+      return jsonResponse({ message: { content: '答案' } });
+    };
+    const out = await makeAdapter(fetch).generate('嗨');
+    assert.equal(out, '答案');
+    assert.equal(n, 2, '第一次失敗後應重試一次即成功');
+  });
+
+  it('逾時（fetch 永不 resolve）→ AbortController 觸發、重試後拋逾時錯誤', async () => {
+    let n = 0;
+    const fetch = (url, opts) => new Promise((_, reject) => {
+      n++;
+      opts.signal.addEventListener('abort', () => {
+        const e = new Error('The operation was aborted'); e.name = 'AbortError'; reject(e);
+      });
+    });
+    await assert.rejects(
+      () => makeAdapter(fetch, { timeoutMs: 20, maxRetries: 1 }).generate('嗨'),
+      /無法連線 Ollama.*請求逾時（20ms）/,
+    );
+    assert.equal(n, 2, 'maxRetries=1 → 共 2 次嘗試');
+  });
+
+  it('4xx（model not found）不重試 → fetch 只被呼叫一次', async () => {
+    let n = 0;
+    const fetch = async () => { n++; return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'model "gen-m" not found' }) }; };
+    await assert.rejects(() => makeAdapter(fetch, { maxRetries: 3 }).generate('嗨'), /404.*ollama pull/);
+    assert.equal(n, 1, '4xx 確定性錯誤不重試');
+  });
+
+  it('5xx → 有重試（兩次 500 後成功）', async () => {
+    let n = 0;
+    const fetch = async () => {
+      n++;
+      if (n <= 2) return { ok: false, status: 500, text: async () => 'internal error' };
+      return jsonResponse({ message: { content: 'ok' } });
+    };
+    const out = await makeAdapter(fetch, { maxRetries: 3 }).generate('嗨');
+    assert.equal(out, 'ok');
+    assert.equal(n, 3, '兩次 5xx 後第三次成功');
+  });
+
+  it('embedBatch 也走 timeout+重試（瞬斷後成功）', async () => {
+    let n = 0;
+    const fetch = async () => {
+      n++;
+      if (n === 1) throw new TypeError('fetch failed');
+      return jsonResponse({ embeddings: [[1, 2, 3]] });
+    };
+    const out = await makeAdapter(fetch).embedBatch(['x']);
+    assert.deepEqual(out, [[1, 2, 3]]);
+    assert.equal(n, 2);
   });
 });
