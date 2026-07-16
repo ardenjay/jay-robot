@@ -6,14 +6,21 @@ const WIN_AFTER = 180;     // query 命中處視窗往後
 // 關鍵字而誤踢。做法是純加法——一律先給 head（同舊行為），再看查詢關鍵字有沒有「只出現在
 // head 之後」，有的話另附該命中處一段視窗把答案帶出。只看落在 head 之後的命中（head 內已可見
 // 的詞如查詢裡的產品名不算），避免被前段就命中的通用詞誤導而漏掉真正深埋的答案關鍵字。
-function buildSnippet(query, text) {
+// queries 可為單一字串或字串陣列（多個查詢變體）：蒐集所有變體的詞去找命中處，讓中文查詢
+// 的英文翻譯版也能在英文內文開窗。比對大小寫不敏感——中文查詢的英文翻譯常為小寫（operating），
+// 需匹配內文的大寫（Operating）；切片仍用原始文字保留大小寫給重排器閱讀。
+function buildSnippet(queries, text) {
   const s = String(text || '');
   if (s.length <= HEAD_LEN) return s;
   const head = s.slice(0, HEAD_LEN);
-  const terms = String(query || '').split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 2);
+  const lower = s.toLowerCase();
+  const qs = Array.isArray(queries) ? queries : [queries];
+  const terms = qs
+    .flatMap(q => String(q || '').split(/[^\p{L}\p{N}]+/u))
+    .filter(t => t.length >= 2);
   let hit = -1;
   for (const t of terms) {
-    const i = s.indexOf(t);
+    const i = lower.indexOf(t.toLowerCase());
     if (i >= HEAD_LEN && (hit < 0 || i < hit)) hit = i; // 只看落在 head 之後的命中
   }
   if (hit < 0) return head;
@@ -21,9 +28,11 @@ function buildSnippet(query, text) {
   return `${head} … ${win}`;
 }
 
-function buildPrompt(query, chunks, topK) {
+// snippetQueries：用於 snippet 開窗的查詢變體（預設等於 query）；prompt 呈現給重排器的
+// 「使用者問題」仍是原始 query，變體只影響開窗、不改變問題語意。
+function buildPrompt(query, chunks, topK, snippetQueries = query) {
   const listing = chunks
-    .map((c, i) => `[${i}] ${c.title}\n${buildSnippet(query, c.text)}`)
+    .map((c, i) => `[${i}] ${c.title}\n${buildSnippet(snippetQueries, c.text)}`)
     .join('\n\n');
   return `你是文件檢索的相關性判斷器。使用者問題：「${query}」\n\n`
     + `以下是候選文件片段，每段前有編號 [n]：\n\n${listing}\n\n`
@@ -46,12 +55,12 @@ function parseIndices(raw, maxIndex) {
 // 波動導致排名不穩，見 fts5-hybrid-search-gotchas 記憶）；候選數超過 topK 時，
 // 用生成模型對候選片段做一次語意排序取代單純依賴檢索分數。
 // 解析失敗或呼叫出錯時 SHALL NOT 中斷檢索，退回原排序的前 topK 筆。
-async function rerankChunks(adapter, query, chunks, topK) {
+async function rerankChunks(adapter, query, chunks, topK, snippetQueries = query) {
   if (chunks.length <= topK) return chunks;
 
   let indices = [];
   try {
-    const raw = await adapter.generate(buildPrompt(query, chunks, topK));
+    const raw = await adapter.generate(buildPrompt(query, chunks, topK, snippetQueries));
     indices = parseIndices(raw, chunks.length);
   } catch (err) {
     console.warn(`[rerank] LLM rerank 失敗，退回原排序：${err.message}`);

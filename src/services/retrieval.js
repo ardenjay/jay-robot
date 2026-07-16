@@ -92,7 +92,7 @@ function shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyToo
 async function runSearchDocuments(adapter, store, query, projectId, sources, projectContext) {
   // 跨語言召回：專案文件多為英文，中文查詢對英文 chunk 召回常不足。含 CJK 的查詢
   // 另產生英文版本，原查詢與英文查詢各自檢索、round-robin 合併去重成候選池（補召回），
-  // rerank 仍以原查詢判定相關性。
+  // rerank 仍以原查詢判定相關性，但 snippet 開窗用全部變體（補英文表格的答案可見性）。
   const variants = await expandQuery(adapter, query);
   const lists = [];
   for (const q of variants) {
@@ -113,7 +113,8 @@ async function runSearchDocuments(adapter, store, query, projectId, sources, pro
       if (pool.length >= UNION_CAP) break;
     }
   }
-  const chunks = await rerankChunks(adapter, query, pool, TOP_K);
+  // rerank 以原查詢判定相關性；snippet 開窗改用全部變體（含英文版），補跨語言可見性缺口
+  const chunks = await rerankChunks(adapter, query, pool, TOP_K, variants);
   for (const c of chunks) {
     sources.set(c.docId, { docId: c.docId, url: `/documents/${projectId}/${encodeURIComponent(c.docId)}` });
   }

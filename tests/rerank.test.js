@@ -91,4 +91,24 @@ describe('buildSnippet（query-aware 片段）', () => {
     assert.ok(!snip.includes('…'));
     assert.equal(snip.length, 400);
   });
+
+  it('queries 傳陣列變體 → 用其中一個變體的詞在 head 之後開窗', () => {
+    // 中文變體在英文內文找不到；英文變體才命中 head 之後的答案
+    const text = 'H'.repeat(500) + ' Operating Temperature -20 ~ 60 °C ' + 'T'.repeat(100);
+    const snip = buildSnippet(['工作溫度範圍', 'Operating temperature range'], text);
+    assert.ok(snip.includes('…'), '應以英文變體開窗');
+    assert.ok(snip.includes('-20 ~ 60'), '視窗應帶出答案');
+  });
+
+  it('命中比對大小寫不敏感 → 小寫查詢詞命中內文大寫詞', () => {
+    const text = 'H'.repeat(500) + ' Operating Temperature -20 ~ 60 °C ' + 'T'.repeat(100);
+    const snip = buildSnippet('operating temperature', text); // 小寫 vs 內文大寫
+    assert.ok(snip.includes('…'));
+    assert.ok(snip.includes('-20 ~ 60'));
+  });
+
+  it('單一字串仍相容：陣列與等價字串結果相同', () => {
+    const text = 'A'.repeat(500) + ' TPM 2.0 安全模組 ' + 'B'.repeat(100);
+    assert.equal(buildSnippet(['TPM 版本'], text), buildSnippet('TPM 版本', text));
+  });
 });
