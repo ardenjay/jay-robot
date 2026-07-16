@@ -125,7 +125,10 @@ class OllamaAdapter extends LLMAdapter {
           const data = await res.json();
           // 近上限警告：num_ctx 調小後,prompt 超過會被 Ollama 從前面靜默截斷、悄悄掉內容。
           // 實際 prompt token 數(prompt_eval_count)超過 num_ctx 90% 時印警告,讓接近截斷顯性化。
-          if (data.prompt_eval_count && data.prompt_eval_count > this.numCtx * 0.9) {
+          // 只適用生成(/api/chat):embedding 批次的 prompt_eval_count 是「全批文字的總和」,
+          // 每筆各自獨立 embed、單筆遠低於上限,拿總和比 num_ctx 必誤報(實測批次 33402/12288
+          // 照樣全對)——embed 路徑跳過,免得狼來了稀釋真警告。
+          if (path !== '/api/embed' && data.prompt_eval_count && data.prompt_eval_count > this.numCtx * 0.9) {
             console.warn(`[Ollama] prompt 用了 ${data.prompt_eval_count}/${this.numCtx} tokens（>90%），接近 num_ctx 上限，可能被截斷`);
           }
           return data;

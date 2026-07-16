@@ -246,4 +246,15 @@ describe('OllamaAdapter num_ctx 與近上限警告', () => {
     } finally { console.warn = orig; }
     assert.ok(!warns.some(w => /接近 num_ctx 上限/.test(w)));
   });
+
+  it('embed 批次的 token 總和再高也不警告(每筆獨立 embed,總和比 num_ctx 是誤報)', async () => {
+    const warns = [];
+    const orig = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const fetch = fakeFetch(jsonResponse({ embeddings: [[0.1], [0.2]], prompt_eval_count: 33402 }));
+      await new OllamaAdapter({ baseUrl: 'http://t:11434', fetch, retryDelayMs: 0 }).embedBatch(['甲', '乙']);
+    } finally { console.warn = orig; }
+    assert.ok(!warns.some(w => /接近 num_ctx 上限/.test(w)), warns.join('|'));
+  });
 });
