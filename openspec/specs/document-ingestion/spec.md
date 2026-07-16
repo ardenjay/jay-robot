@@ -50,6 +50,8 @@ TBD — Document ingestion capability for the markdown-rag-chatbot. Handles rece
 ### Requirement: Parse Markdown by headings
 系統 SHALL 依 `#`、`##`、`###` 標題將 Markdown 文件切割成語意 chunks;每個 chunk 的 `title` SHALL 為其所屬的完整章節路徑(自最上層標題至最近標題,以「 › 」串接),切塊時依標題深度維護階層堆疊(遇同層或較淺標題即截斷堆疊)。
 
+此外,系統 SHALL 把「整段內容皆為粗體」的段落(單行且整行以 `**...**` 包裹,如 `**Q1: ...**`、`**Power Supply**`)視為一個標題邊界:遇到時先 flush 前一 chunk,再以該粗體文字(去除 `**`)作為新章節標題壓入階層堆疊。此舉修正「文件用粗體充當段落標題、無 `#` 標題」時被整份視為無標題而按長度硬切、多主題混入單一 chunk 導致召回稀釋的問題。粗體標題 SHALL 視為比任何 `#` 標題更深的一層(不覆蓋既有 `#` 章節路徑,而是附加於其下)。僅含行內部分粗體(非整段粗體)的段落 SHALL NOT 觸發此切塊。
+
 #### Scenario: Document with multiple headings
 - **WHEN** Markdown 文件包含多個標題
 - **THEN** 每個標題與其下方內容形成一個獨立 chunk
@@ -66,9 +68,18 @@ TBD — Document ingestion capability for the markdown-rag-chatbot. Handles rece
 - **WHEN** Markdown 文件沒有任何標題
 - **THEN** 整份文件作為一個 chunk,`title` 為檔案名稱
 
+#### Scenario: Bold-only line acts as a heading boundary
+- **WHEN** Markdown 文件用整段粗體充當段落標題(如 FAQ 的 `**Q1: ...**`、`**Q2：...**`)而無 `#` 標題
+- **THEN** 每個粗體標題與其下方內容形成一個獨立 chunk(而非整份按長度硬切成多主題混雜的 chunk),各 chunk 的 title 為該粗體文字
+
+#### Scenario: Inline bold does not trigger splitting
+- **WHEN** 某段落只含行內部分粗體(如「本板用 **MAX96712** 做轉換」),而非整段皆為粗體
+- **THEN** 不因該行內粗體而切塊,該段落沿用當前章節路徑
+
 #### Scenario: Chunk exceeds 1500 characters
 - **WHEN** 單一 chunk 超過 1500 字
 - **THEN** 系統以段落為單位進一步切割,確保每個 chunk 不超過 1500 字,各子塊沿用同一章節路徑 title
+
 
 ### Requirement: Embed and store chunks
 系統 SHALL 將 chunks 透過 Embedding API 轉換為向量,並連同原始文字、標題、文件 ID 一起儲存至 vector store;embedding 的輸入文本 SHALL 為「title + 換行 + 內文」(標題脈絡參與語意比對),儲存的 `content` 欄位 SHALL 維持純內文。為降低 API 請求數與速率限制(429)風險,系統 SHALL 以**批次方式**產生 embedding(每批多個 chunk 一次送出),而非每個 chunk 各發一次請求。
