@@ -215,3 +215,35 @@ describe('OllamaAdapter timeout + 重試', () => {
     assert.equal(n, 2);
   });
 });
+
+describe('OllamaAdapter num_ctx 與近上限警告', () => {
+  it('預設 num_ctx 為 12288', async () => {
+    const fetch = fakeFetch(jsonResponse({ message: { content: 'x' } }));
+    // 用預設 num_ctx（不覆寫）
+    const adapter = new OllamaAdapter({ baseUrl: 'http://t:11434', fetch, retryDelayMs: 0 });
+    await adapter.generate('嗨');
+    assert.equal(fetch.calls[0].body.options.num_ctx, 12288);
+  });
+
+  it('prompt_eval_count 超過 num_ctx 90% → 印警告', async () => {
+    const warns = [];
+    const orig = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const fetch = fakeFetch(jsonResponse({ message: { content: 'x' }, prompt_eval_count: 11500 })); // >12288*0.9=11059
+      await new OllamaAdapter({ baseUrl: 'http://t:11434', fetch, retryDelayMs: 0 }).generate('嗨');
+    } finally { console.warn = orig; }
+    assert.ok(warns.some(w => /接近 num_ctx 上限/.test(w) && /11500\/12288/.test(w)), warns.join('|'));
+  });
+
+  it('prompt_eval_count 未超過 90% → 不警告', async () => {
+    const warns = [];
+    const orig = console.warn;
+    console.warn = (m) => warns.push(String(m));
+    try {
+      const fetch = fakeFetch(jsonResponse({ message: { content: 'x' }, prompt_eval_count: 5000 }));
+      await new OllamaAdapter({ baseUrl: 'http://t:11434', fetch, retryDelayMs: 0 }).generate('嗨');
+    } finally { console.warn = orig; }
+    assert.ok(!warns.some(w => /接近 num_ctx 上限/.test(w)));
+  });
+});

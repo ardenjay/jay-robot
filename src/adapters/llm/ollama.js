@@ -11,7 +11,9 @@ const GEN_TEMPERATURE = process.env.OLLAMA_TEMPERATURE !== undefined
   : 0;
 // Ollama 執行期預設 num_ctx 僅 4096，遠小於模型上限；system prompt（含 NPDS 目錄）+ 工具宣告
 // 就會超過，Ollama 會「從前面靜默截斷」——等於砍掉 system 指令與工具，模型開始亂答。
-const DEFAULT_NUM_CTX = 16384;
+// 實測 2581 個真實請求最大 prompt 9310 tokens、90 百分位 6198；12288 對最大 prompt 仍留
+// 約 3000 tokens 給生成，又比 16384 少預留 25% KV。可由 OLLAMA_NUM_CTX 覆寫。
+const DEFAULT_NUM_CTX = 12288;
 
 // Gemini 形狀的 contents → Ollama messages。呼叫端（retrieval）維持 Gemini 格式，差異關在這裡。
 function toOllamaMessages(contents) {
@@ -120,7 +122,13 @@ class OllamaAdapter extends LLMAdapter {
           if (res.status >= 400 && res.status < 500) throw httpErr; // 確定性錯誤，不重試
           lastErr = httpErr; // 5xx 可重試
         } else {
-          return await res.json();
+          const data = await res.json();
+          // 近上限警告：num_ctx 調小後,prompt 超過會被 Ollama 從前面靜默截斷、悄悄掉內容。
+          // 實際 prompt token 數(prompt_eval_count)超過 num_ctx 90% 時印警告,讓接近截斷顯性化。
+          if (data.prompt_eval_count && data.prompt_eval_count > this.numCtx * 0.9) {
+            console.warn(`[Ollama] prompt 用了 ${data.prompt_eval_count}/${this.numCtx} tokens（>90%），接近 num_ctx 上限，可能被截斷`);
+          }
+          return data;
         }
       } catch (err) {
         if (err.message && err.message.startsWith('Ollama ')) throw err; // 4xx httpErr，直接往上拋
