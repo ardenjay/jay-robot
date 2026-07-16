@@ -60,4 +60,28 @@ describe('chunker', () => {
       assert.ok(chunk.text.length <= 1500, `chunk 長度 ${chunk.text.length} 超過 1500`);
     }
   });
+
+  it('整行粗體充當標題(無 # 標題)→ 每個粗體段各自成 chunk,title 為粗體文字', () => {
+    // FAQ 式文件：用 **Q1: ...** 當段落標題,無 # 標題
+    const md = `**Q1: 第一個問題?**\n\n第一個答案。\n\n**Q2：第二個問題?**\n\n第二個答案。`;
+    const chunks = parseAndChunk(md, 'faq.md');
+    assert.equal(chunks.length, 2, '兩個粗體標題應切成兩個 chunk');
+    assert.equal(chunks[0].title, 'Q1: 第一個問題?');
+    assert.ok(chunks[0].text.includes('第一個答案') && !chunks[0].text.includes('第二個答案'), '各 chunk 不應混入他題');
+    assert.equal(chunks[1].title, 'Q2：第二個問題?');
+  });
+
+  it('行內部分粗體(非整段粗體)不觸發切塊', () => {
+    const md = `# 章\n\n本板用 **MAX96712** 做轉換,還有 **PoC** 供電。`;
+    const chunks = parseAndChunk(md, 'x.md');
+    assert.equal(chunks.length, 1, '行內粗體不應切塊');
+    assert.equal(chunks[0].title, '章');
+  });
+
+  it('粗體標題附加於現有 # 章節路徑之下,不覆蓋它', () => {
+    const md = `# 介面\n\n## FAQ\n\n**Q1: 問題?**\n\n答案內容。`;
+    const chunks = parseAndChunk(md, 'x.md');
+    const last = chunks[chunks.length - 1];
+    assert.equal(last.title, '介面 › FAQ › Q1: 問題?');
+  });
 });

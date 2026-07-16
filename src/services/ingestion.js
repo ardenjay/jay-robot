@@ -39,14 +39,29 @@ function parseAndChunk(markdownText, filename) {
     currentText = '';
   }
 
+  // 「整段皆為粗體」的段落當標題邊界：有些文件（如 FAQ）用 **Q1: ...** 粗體充當段落標題、
+  // 完全沒有 # 標題，若不處理會被整份視為無標題、按長度硬切，多個不相關主題混進同一 chunk，
+  // 單一主題查詢對這種多主題 chunk 召回被稀釋。深度給 BOLD_HEADING_DEPTH（比任何 # 都深），
+  // 附加在現有 # 章節路徑之下、不覆蓋它。只認「整段粗體」，行內部分粗體不算。
+  const BOLD_HEADING_DEPTH = 99;
+  const boldHeadingText = (token) => {
+    if (token.type !== 'paragraph') return null;
+    const raw = String(token.raw || '').trim();
+    const m = raw.match(/^\*\*([^\n]+?)\*\*$/); // 單行、整行以 ** 包裹
+    return m ? m[1].trim() : null;
+  };
+
   for (const token of tokens) {
-    if (token.type === 'heading') {
+    const boldTitle = boldHeadingText(token);
+    if (token.type === 'heading' || boldTitle) {
       flushChunk();
+      const depth = boldTitle ? BOLD_HEADING_DEPTH : token.depth;
+      const text = boldTitle || token.text;
       // 同層或較淺的標題出現 → 截斷堆疊再壓入（跳層按實際 depth 放，不補洞）
-      while (headingStack.length && headingStack[headingStack.length - 1].depth >= token.depth) {
+      while (headingStack.length && headingStack[headingStack.length - 1].depth >= depth) {
         headingStack.pop();
       }
-      headingStack.push({ depth: token.depth, text: token.text });
+      headingStack.push({ depth, text });
     } else if (token.type === 'space') {
       currentText += '\n';
     } else if (token.raw) {
