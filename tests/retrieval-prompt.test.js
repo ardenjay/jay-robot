@@ -202,6 +202,15 @@ describe('shouldForceDocSearch 決策分支', () => {
   it('用了 netlist 但一次也沒 miss(全命中) → 不強制', () => {
     assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, netlistCalls: 1, netlistMisses: 0 }), false);
   });
+  it('netlist 有命中但最終放棄(givingUp)且未查文件 → 強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, netlistCalls: 2, netlistMisses: 1, givingUp: true }), true);
+  });
+  it('放棄但已查過文件 → 不強制(避免迴圈)', () => {
+    assert.equal(shouldForceDocSearch({ ...base, usedAnyTool: true, usedDocSearch: true, givingUp: true }), false);
+  });
+  it('放棄但已強制過 → 不再強制', () => {
+    assert.equal(shouldForceDocSearch({ ...base, forcedSearch: true, givingUp: true }), false);
+  });
 });
 
 describe('專案背景作為檢索結果首個 chunk', () => {

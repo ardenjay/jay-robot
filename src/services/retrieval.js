@@ -18,6 +18,9 @@ const RERANK_POOL_K = 25;
 const UNION_CAP = 30;
 const MAX_TOOL_ROUNDS = 6;
 const NO_ANSWER_PHRASE = '無法在提供的資料中找到答案';
+// 放棄語前綴：NO_ANSWER_PHRASE 的共同前綴。模型放棄時常改寫尾巴（「…找到與X相關的資訊」），
+// 用前綴才抓得到這些變體；仍是系統指定放棄語的一部分，誤中正常答案的機率低。
+const NO_ANSWER_PREFIX = '無法在提供的資料中找到';
 
 // 文件檢索工具：需要已上傳文件內容時由 LLM 呼叫
 const SEARCH_DOCUMENTS_DECL = {
@@ -73,12 +76,12 @@ function buildSystemInstruction(hasNet, uploadedCodes, { projectName, projectCon
 }
 
 // 是否該由系統代跑一次強制文件檢索（純函式，便於窮舉各分支測試）。
-// 前提：專案有文件、整段對話從未成功查過文件、且尚未強制過。滿足前提後，
-// 「完全沒用工具」或「用了 netlist 但每次查詢都 miss」時回 true；netlist 有任一命中則回 false。
-function shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses }) {
+// 前提：專案有文件、整段對話從未成功查過文件、且尚未強制過。滿足前提後，下列任一為真即回 true：
+// 「完全沒用工具」、「用了 netlist 但每次查詢都 miss」、或「最終答案是放棄語（沒查文件就要放棄）」。
+function shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses, givingUp }) {
   if (!hasDocs || usedDocSearch || forcedSearch) return false;
   const allNetlistMissed = netlistCalls > 0 && netlistMisses === netlistCalls;
-  return !usedAnyTool || allNetlistMissed;
+  return !usedAnyTool || allNetlistMissed || !!givingUp;
 }
 
 // 文件檢索：embed 問題 → hybrid search（向量 + 關鍵字融合）取 top-K chunks，
@@ -167,10 +170,11 @@ async function* answer(question, projectId, adapter = llm, store = vectorStore) 
 
     if (!functionCalls.length) {
       // 程式層防護：小模型（如 qwen3:14b）對 prompt 規則不可靠，可能沒查文件就作答。
-      // 兩種情境代跑一次文件檢索、以工具回合塞回歷史讓模型重答（僅強制一次，避免迴圈）：
-      // (a) 完全沒用工具就作答；(b) 只用了 netlist 且每次查詢都 miss（found:false / 工具錯誤）。
-      // 只要曾成功查過文件（usedDocSearch），或 netlist 有任一命中，就不介入。
-      if (shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses })) {
+      // 三種情境代跑一次文件檢索、以工具回合塞回歷史讓模型重答（僅強制一次，避免迴圈）：
+      // (a) 完全沒用工具就作答；(b) 只用了 netlist 且每次查詢都 miss；(c) 最終答案是放棄語（沒查文件就要放棄）。
+      // 只要曾成功查過文件（usedDocSearch），就不介入。
+      const givingUp = (text || '').includes(NO_ANSWER_PREFIX);
+      if (shouldForceDocSearch({ hasDocs, usedDocSearch, forcedSearch, usedAnyTool, netlistCalls, netlistMisses, givingUp })) {
         forcedSearch = true;
         usedDocSearch = true;
         console.log(`[tool] search_documents(forced) ${JSON.stringify({ query: question })}`);
