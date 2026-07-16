@@ -133,6 +133,15 @@
       overflow: hidden;
     }
 
+    /* 側欄寬度拖拉把手 */
+    .sidebar-resizer {
+      width: 4px;
+      cursor: col-resize;
+      background: transparent;
+      flex-shrink: 0;
+    }
+    .sidebar-resizer:hover, .sidebar-resizer.dragging { background: #c7d2fe; }
+
     .sidebar-section {
       padding: 16px;
       border-bottom: 1px solid #f0f0f0;
@@ -587,6 +596,8 @@
           <div id="context-status"></div>
         </div>
       </aside>
+
+      <div class="sidebar-resizer" id="sidebar-resizer" title="拖拉調整寬度"></div>
 
       <!-- Chat -->
       <div class="chat-area">
@@ -1165,6 +1176,34 @@
         folderUploadBtn.disabled = false;
       }
     }
+
+    // ── 側欄寬度拖拉(記憶於 localStorage)──
+    (() => {
+      const sidebar = document.querySelector('.detail-sidebar');
+      const resizer = document.getElementById('sidebar-resizer');
+      if (!sidebar || !resizer) return;
+
+      const saved = parseInt(localStorage.getItem('sidebarWidth'), 10);
+      if (saved) sidebar.style.width = `${saved}px`;
+
+      const clamp = w => Math.min(Math.max(w, 200), Math.floor(window.innerWidth / 2));
+
+      resizer.addEventListener('mousedown', e => {
+        e.preventDefault();
+        resizer.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+        const onMove = ev => { sidebar.style.width = `${clamp(ev.clientX)}px`; };
+        const onUp = () => {
+          resizer.classList.remove('dragging');
+          document.body.style.userSelect = '';
+          localStorage.setItem('sidebarWidth', parseInt(sidebar.style.width, 10) || 280);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    })();
 
     // ── Chat (Task 8.7) ──
     const messagesEl    = document.getElementById('messages');
