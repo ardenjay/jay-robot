@@ -43,15 +43,19 @@ function findFirstMd(dir) {
   return null;
 }
 
+// MinerU 呼叫方式依機器安裝方式而異（build server 用 conda env、測試機用 uv 裝進 PATH），
+// 以 MINERU_CMD 環境變數覆寫（空白分隔，如 `mineru`）；預設維持 conda，正式機不受影響。
+const MINERU_CMD = (process.env.MINERU_CMD || 'conda run --no-capture-output -n mineru mineru').trim().split(/\s+/);
+
 function convertPdfToMarkdown(pdfPath, useVlm, onLog) {
   return new Promise((resolve, reject) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mineru-'));
     console.log(`[MinerU] 開始轉換：${pdfPath} (VLM: ${useVlm})`);
 
-    const args = ['run', '--no-capture-output', '-n', 'mineru', 'mineru', '-p', pdfPath, '-o', tmpDir];
+    const args = [...MINERU_CMD.slice(1), '-p', pdfPath, '-o', tmpDir];
     if (!useVlm) args.push('-b', 'pipeline');
 
-    const proc = spawn('conda', args);
+    const proc = spawn(MINERU_CMD[0], args);
 
     proc.stdout.on('data', d => {
       const msg = d.toString().trim();
