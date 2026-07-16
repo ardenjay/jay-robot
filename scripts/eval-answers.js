@@ -25,6 +25,7 @@ const { values } = parseArgs({
     project: { type: 'string', default: '100T' },
     case: { type: 'string' },
     smoke: { type: 'boolean', default: false },
+    tail: { type: 'string' }, // 只跑最後 N 題（新批都 append 在尾端，測新批用）
   },
 });
 
@@ -89,6 +90,7 @@ async function runCase(c, projectId) {
   let cases = JSON.parse(fs.readFileSync(casesPath, 'utf-8'));
   if (values.smoke) cases = cases.filter(c => c.smoke === true);
   if (values.case) cases = cases.filter(c => c.q.includes(values.case));
+  if (values.tail) cases = cases.slice(-parseInt(values.tail, 10)); // 只跑尾端 N 題
   console.log(`專案:${project.name}｜案例檔:${path.basename(casesPath)}｜cases:${cases.length}${values.smoke ? '（smoke）' : ''}｜LLM_ADAPTER=${process.env.LLM_ADAPTER}\n`);
 
   let hardFail = 0;
