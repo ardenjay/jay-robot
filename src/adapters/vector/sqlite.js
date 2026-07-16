@@ -54,6 +54,16 @@ const RRF_K = 60; // Reciprocal Rank Fusion 常數，文獻慣用值
 //     拆欄位後用 bm25(chunks_fts, 1.0, 0.3) 讓 doc_id 命中打折，不再蓋過內容相關性。
 const FTS_VERSION = 5;
 
+// DB 版本階梯：程式碼宣告搭配的 DB 版本（DB_VERSION），啟動時 PRAGMA user_version 落後
+// 就依序執行缺的遷移步驟、每步完成即蓋戳（見 _runMigrations）。階梯只收「秒級、零外部
+// 依賴、可阻塞啟動」的遷移（schema 建立、FTS 整表重建）；需要 embedding 等外部服務的
+// 資料補建走背景層（services/ingestion 的 backfillTableRows，per-doc 版本戳），因為
+// Ollama 沒起來不能擋服務、分鐘級任務也需要可中斷續跑。
+// v1~v5 為 FTS 定義的歷史版本（見上方 FTS_VERSION 註解）；v6：sidecar schema
+//（table_rows / doc_ingest_meta）。日後 DB 結構改版＝加一個步驟 + bump DB_VERSION，
+// 正式機 git pull 重啟即自動升級（兩台機器的 rag.db 永不同步，這是唯一部署路徑）。
+const DB_VERSION = 6;
+
 // FTS 索引文本：content_seg（標題章節路徑 + 內文）與 doc_seg（文件名）分開，
 // 讓 BM25 可以個別加權，doc_id 命中不再因為短 chunk 而蓋過內容本身的相關性。
 function ftsContentSeg(title, content) {
@@ -111,21 +121,9 @@ class SqliteVectorAdapter extends VectorAdapter {
     try { this.db.exec(`ALTER TABLE chunks ADD COLUMN phase TEXT DEFAULT ''`); } catch {}
     try { this.db.exec(`ALTER TABLE projects ADD COLUMN context TEXT NOT NULL DEFAULT ''`); } catch {}
 
-    // Sidecar 表格列索引：大表的每一 body 列（帶表頭與章節/caption 脈絡）獨立存放，
-    // 不進 chunks、不進 FTS——只在檢索時以相似度門檻限量注入 rerank 候選池
-    // （見 document-retrieval spec: Bounded table-row injection）。first_cell 供
-    // 「查詢含 pin 編號/屬性名 對 列首格」的字面加成，救 embedding 分不出數字的查詢。
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS table_rows (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        doc_id     TEXT NOT NULL,
-        title      TEXT,
-        content    TEXT NOT NULL,
-        first_cell TEXT DEFAULT '',
-        embedding  TEXT NOT NULL,
-        project_id TEXT DEFAULT 'default'
-      );
-    `);
+    // sidecar schema 在階梯之外也無條件確保（冪等）：FTS5 不可用的環境階梯會中止在
+    // step 5，但 table_rows / doc_ingest_meta 不依賴 FTS，必須照樣到位。
+    this._ensureSidecarSchema();
 
     // 全文索引（keyword search 用）：FTS5 不可用時降級為純向量模式，不讓服務掛掉
     this.ftsEnabled = false;
@@ -144,23 +142,64 @@ class SqliteVectorAdapter extends VectorAdapter {
         );
       `);
       this.ftsEnabled = true;
-      // 索引定義版本落後（如 v2 起 content_seg 含 title）→ 一次性整表重建，
-      // 既有 chunks 的 title 一併納入索引（舊資料不重灌也受益）
-      if (ver < FTS_VERSION) {
-        this._rebuildFts();
-        this.db.pragma(`user_version = ${FTS_VERSION}`);
-      } else {
-        // backfill：舊 DB（無 FTS）或先前寫入不同步（筆數不符）→ 整表重建
-        const nChunks = this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get().c;
-        const nFts = this.db.prepare('SELECT COUNT(*) AS c FROM chunks_fts').get().c;
-        if (nChunks !== nFts) this._rebuildFts();
-      }
+      // 版本階梯：user_version 落後就依序補跑缺的步驟（每步蓋戳，見 _runMigrations）
+      this._runMigrations();
+      // 一致性防護（階梯外，非版本遷移）：FTS 寫入曾不同步（筆數不符）→ 整表重建
+      const nChunks = this.db.prepare('SELECT COUNT(*) AS c FROM chunks').get().c;
+      const nFts = this.db.prepare('SELECT COUNT(*) AS c FROM chunks_fts').get().c;
+      if (nChunks !== nFts) this._rebuildFts();
     } catch (err) {
       console.warn(`[vector] FTS5 不可用，keyword 搜尋停用（hybridSearch 退回純向量）：${err.message}`);
     }
 
     // 維持與舊介面相容：呼叫端仍可 `await store._ready`
     this._ready = Promise.resolve();
+  }
+
+  // 同步遷移階梯：依版本號執行 user_version 之後的步驟，每步完成即蓋戳——
+  // 「執行成功、蓋戳前崩潰」下次重跑也安全（步驟皆冪等）。
+  // 新增 DB 結構改版：在此加 { to: N, run }，並 bump 檔頭的 DB_VERSION。
+  _runMigrations() {
+    const steps = [
+      // v5（含以前）：FTS 定義版本——整表重建，既有 chunks 的 title/doc_seg 納入索引
+      { to: FTS_VERSION, run: () => this._rebuildFts() },
+      // v6：sidecar schema（constructor 已無條件確保，此步冪等重跑，作用是蓋戳）
+      { to: 6, run: () => this._ensureSidecarSchema() },
+    ];
+    let ver = this.db.pragma('user_version', { simple: true });
+    for (const s of steps) {
+      if (ver >= s.to) continue;
+      s.run();
+      this.db.pragma(`user_version = ${s.to}`);
+      ver = s.to;
+    }
+  }
+
+  // Sidecar 表格列索引：大表的每一 body 列（帶表頭與章節/caption 脈絡）獨立存放，
+  // 不進 chunks、不進 FTS——只在檢索時以相似度門檻限量注入 rerank 候選池
+  // （見 rag-query spec: Bounded table-row injection）。first_cell 供
+  // 「查詢含 pin 編號/屬性名 對 列首格」的字面加成，救 embedding 分不出數字的查詢。
+  // doc_ingest_meta 為 per-doc sidecar 版本戳：進料/啟動回填完成時蓋版本（版本語意
+  // 由 services/ingestion 的 SIDECAR_VERSION 定義），啟動背景回填據此找出落後文件
+  //（冪等、可中斷續跑）。
+  _ensureSidecarSchema() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS table_rows (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        doc_id     TEXT NOT NULL,
+        title      TEXT,
+        content    TEXT NOT NULL,
+        first_cell TEXT DEFAULT '',
+        embedding  TEXT NOT NULL,
+        project_id TEXT DEFAULT 'default'
+      );
+      CREATE TABLE IF NOT EXISTS doc_ingest_meta (
+        project_id      TEXT NOT NULL,
+        doc_id          TEXT NOT NULL,
+        sidecar_version INTEGER DEFAULT 0,
+        PRIMARY KEY (project_id, doc_id)
+      );
+    `);
   }
 
   // FTS 整表重建（初始化 backfill 用）：千級 chunks 成本毫秒~秒級
@@ -207,6 +246,37 @@ class SqliteVectorAdapter extends VectorAdapter {
       }
     });
     insertMany(chunks);
+  }
+
+  // ===== per-doc sidecar 版本戳（背景回填的冪等基礎）=====
+  getDocSidecarVersion(docId, projectId) {
+    const r = this.db.prepare('SELECT sidecar_version FROM doc_ingest_meta WHERE doc_id = ? AND project_id = ?')
+      .get(docId, projectId || 'default');
+    return r ? r.sidecar_version : 0;
+  }
+
+  stampDocSidecarVersion(docId, projectId, version) {
+    this.db.prepare(`
+      INSERT INTO doc_ingest_meta (project_id, doc_id, sidecar_version) VALUES (?, ?, ?)
+      ON CONFLICT (project_id, doc_id) DO UPDATE SET sidecar_version = excluded.sidecar_version
+    `).run(projectId || 'default', docId, version);
+  }
+
+  // 啟動回填掃描：DB 內有 chunks 但 sidecar 版本戳低於 version 的文件清單
+  listDocsForSidecarBackfill(version) {
+    return this.db.prepare(`
+      SELECT DISTINCT c.project_id AS projectId, c.doc_id AS docId
+      FROM chunks c
+      LEFT JOIN doc_ingest_meta m ON m.project_id = c.project_id AND m.doc_id = c.doc_id
+      WHERE COALESCE(m.sidecar_version, 0) < ?
+      ORDER BY c.project_id, c.doc_id
+    `).all(version);
+  }
+
+  // 只清 sidecar 列、不動 chunks/FTS——啟動回填重跑安全用（clear() 會連 chunks 一起刪，不可用）
+  clearTableRowsOnly(docId, projectId) {
+    this.db.prepare('DELETE FROM table_rows WHERE doc_id = ? AND project_id = ?')
+      .run(docId, projectId || 'default');
   }
 
   // Sidecar 表格列寫入：rows = [{docId, title, text, firstCell, embedding, projectId}]
@@ -327,10 +397,12 @@ class SqliteVectorAdapter extends VectorAdapter {
       if (projectId) {
         this.db.prepare('DELETE FROM chunks WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
         this.db.prepare('DELETE FROM table_rows WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
+        this.db.prepare('DELETE FROM doc_ingest_meta WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
         if (this.ftsEnabled) this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ? AND project_id = ?').run(docId, projectId);
       } else {
         this.db.prepare('DELETE FROM chunks WHERE doc_id = ?').run(docId);
         this.db.prepare('DELETE FROM table_rows WHERE doc_id = ?').run(docId);
+        this.db.prepare('DELETE FROM doc_ingest_meta WHERE doc_id = ?').run(docId);
         if (this.ftsEnabled) this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ?').run(docId);
       }
     });
@@ -345,8 +417,10 @@ class SqliteVectorAdapter extends VectorAdapter {
       const r = this.db
         .prepare('UPDATE chunks SET doc_id = ? WHERE doc_id = ? AND project_id = ?')
         .run(newDocId, oldDocId, projectId);
-      // sidecar 表格列跟著改名（列 title 不含 docId，改欄位即可）
+      // sidecar 表格列與版本戳跟著改名（列 title 不含 docId，改欄位即可；
+      // meta 用 OR REPLACE 防新名已有殘留戳時 PK 衝突）
       this.db.prepare('UPDATE table_rows SET doc_id = ? WHERE doc_id = ? AND project_id = ?').run(newDocId, oldDocId, projectId);
+      this.db.prepare('UPDATE OR REPLACE doc_ingest_meta SET doc_id = ? WHERE doc_id = ? AND project_id = ?').run(newDocId, oldDocId, projectId);
       if (r.changes > 0 && this.ftsEnabled) {
         this.db.prepare('DELETE FROM chunks_fts WHERE doc_id = ? AND project_id = ?').run(oldDocId, projectId);
         const rows = this.db
