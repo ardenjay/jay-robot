@@ -341,8 +341,11 @@ async function backfillTableRows(store, llmAdapter, docsRoot) {
         }
       } else if (fs.existsSync(base) && docId.toLowerCase().endsWith('.md')) {
         rawRows.push(...extractTableRows(fs.readFileSync(base, 'utf-8'), docId));
+      } else if (fs.existsSync(`${base}.md`)) {
+        // 轉檔類上傳（.docx/.pdf）持久化的 md sibling（`<docId>.md`，由 upload 路徑存放）
+        rawRows.push(...extractTableRows(fs.readFileSync(`${base}.md`, 'utf-8'), docId));
       } else {
-        skipped.push(docId); // 原始檔不存在或非 .md（.docx/.pdf 需轉檔，不在回填範圍）
+        skipped.push(docId); // 原始檔不存在或非 .md 且無 sibling（重新上傳後即納入）
         continue;
       }
 

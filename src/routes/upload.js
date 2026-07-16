@@ -153,6 +153,12 @@ router.post('/', blockWhenReadOnly, upload.single('file'), async (req, res) => {
     const docsDir = path.join(process.cwd(), 'public', 'documents', projectId.trim());
     fs.mkdirSync(docsDir, { recursive: true });
     fs.copyFileSync(req.file.path, path.join(docsDir, req.file.originalname));
+    // 轉檔類上傳（.docx/.pdf 等）把轉出的 md 一併持久化為 `<原檔名>.md` sibling：
+    // 啟動回填只吃 md、不重跑轉檔，沒這份 sibling 的文件在 SIDECAR_VERSION bump 後
+    // 永遠追不上（每次啟動被跳過）。直接上傳 .md 者原檔即 md，不需 sibling。
+    if (mdPath !== req.file.path) {
+      fs.copyFileSync(mdPath, path.join(docsDir, `${req.file.originalname}.md`));
+    }
 
     send({ type: 'done', message: `成功處理 ${req.file.originalname}`, chunks: chunkCount });
   } catch (err) {

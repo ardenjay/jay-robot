@@ -146,6 +146,17 @@ describe('backfillTableRows 啟動回填', () => {
     assert.equal((await store.searchTableRows(makeVec(0), 10, 'p1')).length, 4);
   });
 
+  it('轉檔類單檔(.docx)有 sibling md → 以 sibling 回填並蓋戳', async () => {
+    const { store, root, docId } = await setup({ folderLayout: false, docId: 'spec.docx', md: '原檔佔位(非md內容)' });
+    // 模擬 upload 路徑持久化的轉檔 md sibling:<docId>.md
+    fs.writeFileSync(path.join(root, 'p1', `${docId}.md`), BIG_TABLE_MD);
+    const r = await backfillTableRows(store, okAdapter, root);
+    assert.equal(r.done, 1);
+    assert.equal(r.skipped, 0);
+    assert.equal((await store.searchTableRows(makeVec(0), 10, 'p1')).length, 4);
+    assert.equal(store.getDocSidecarVersion(docId, 'p1'), SIDECAR_VERSION);
+  });
+
   it('非 .md 原始檔(單檔 .docx)跳過且不蓋戳', async () => {
     const { store, root, docId } = await setup({ folderLayout: false, docId: 'spec.docx' });
     const r = await backfillTableRows(store, okAdapter, root);
