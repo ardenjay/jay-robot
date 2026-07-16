@@ -73,11 +73,15 @@ TBD — LLM Adapter capability for the markdown-rag-chatbot. Defines the interfa
 - **THEN** 回應為一般文字，結束工具迴圈
 
 ### Requirement: Ollama adapter for local model serving
-系統 SHALL 提供 `OllamaAdapter`（`LLM_ADAPTER=ollama` 啟用），以 Ollama REST API 實作 LLMAdapter 全部介面：`embed`/`embedBatch` 用 `/api/embed`（批次以單一請求送出 `input` 陣列）、`generate`/`stream`/`chatWithTools` 用 `/api/chat`。生成請求 SHALL 帶 `options.temperature`（預設 0.2）。端點與模型 SHALL 可由環境變數配置：`OLLAMA_BASE_URL`（預設 `http://localhost:11434`）、`OLLAMA_GEN_MODEL`（預設 `qwen3:14b`）、`OLLAMA_EMBED_MODEL`（預設 `bge-m3`）、`OLLAMA_NUM_CTX`（預設 `16384`）。生成請求 SHALL 帶 `options.num_ctx`——Ollama 執行期預設僅 4096，system prompt（含 NPDS 目錄）加工具宣告會超過而被靜默截斷，導致模型忽略指令與工具。實作 SHALL 使用 Node 內建 `fetch`，不新增 npm 依賴。
+系統 SHALL 提供 `OllamaAdapter`（`LLM_ADAPTER=ollama` 啟用），以 Ollama REST API 實作 LLMAdapter 全部介面：`embed`/`embedBatch` 用 `/api/embed`（批次以單一請求送出 `input` 陣列）、`generate`/`stream`/`chatWithTools` 用 `/api/chat`。生成請求 SHALL 帶 `options.temperature`（預設 0.2）。端點與模型 SHALL 可由環境變數配置：`OLLAMA_BASE_URL`（預設 `http://localhost:11434`）、`OLLAMA_GEN_MODEL`（預設 `qwen3:14b`）、`OLLAMA_EMBED_MODEL`（預設 `bge-m3`）、`OLLAMA_NUM_CTX`（預設 `12288`）。生成請求 SHALL 帶 `options.num_ctx`——Ollama 執行期預設僅 4096，system prompt（含 NPDS 目錄）加工具宣告會超過而被靜默截斷，導致模型忽略指令與工具；預設 12288 取自實測最大 prompt（約 9310 tokens）加生成餘裕，避免預留過多 KV 記憶體。adapter SHALL 在某次請求的實際 prompt token 數（Ollama 回應的 `prompt_eval_count`）超過 `num_ctx` 的 90% 時輸出警告，使「接近截斷」顯性化。實作 SHALL 使用 Node 內建 `fetch`，不新增 npm 依賴。
 
 #### Scenario: Context window covers system prompt and tools
 - **WHEN** 送出生成／工具呼叫請求
-- **THEN** 請求的 `options.num_ctx` 為配置值（預設 16384），不受 Ollama 4096 預設截斷影響
+- **THEN** 請求的 `options.num_ctx` 為配置值（預設 12288），不受 Ollama 4096 預設截斷影響
+
+#### Scenario: Warn when prompt approaches num_ctx
+- **WHEN** 某次請求的回應 `prompt_eval_count` 超過 `num_ctx` 的 90%
+- **THEN** adapter 輸出警告，指出 prompt token 數與 num_ctx，提示可能接近截斷
 
 #### Scenario: Embed via Ollama
 - **WHEN** 呼叫 `embed(text)` 或 `embedBatch(texts)`
