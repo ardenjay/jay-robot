@@ -160,6 +160,13 @@ class OllamaAdapter extends LLMAdapter {
     return data.embeddings;
   }
 
+  // 立刻卸載生成模型釋放 VRAM（MinerU VLM 轉檔等外部程序要用 GPU 時呼叫）。
+  // keep_alive: 0 是「單次請求」語意：只卸這一次,不改伺服器的 OLLAMA_KEEP_ALIVE 預設;
+  // 下次任何生成請求會自動重載並恢復預設常駐,無需復原任何設定。embedding 模型不動。
+  async unloadGenerateModel() {
+    await this._postJson('/api/generate', { model: this.genModel, keep_alive: 0 });
+  }
+
   _chatBody(messages, extra = {}) {
     return {
       model: this.genModel,

@@ -8,6 +8,7 @@ const { ingestFile, ingestFolder, phaseFromFolderName } = require('../services/i
 const { fixLatin1Mojibake } = require('../services/uploadName');
 const { blockWhenReadOnly } = require('../middleware/readOnly');
 const vectorStore = require('../adapters/vector');
+const llm = require('../adapters/llm');
 
 const router = express.Router();
 
@@ -143,6 +144,17 @@ router.post('/', blockWhenReadOnly, upload.single('file'), async (req, res) => {
 
   try {
     if (isPdf) {
+      // VLM 轉檔前先卸載 Ollama 生成模型騰 VRAM（qwen3:14b ~11GB + hybrid-engine 會擠爆）。
+      // 一次性卸載:下次生成請求自動重載並恢復伺服器預設 keep_alive。失敗不擋轉檔（如
+      // adapter 非 ollama、或 Ollama 沒起——後者 embedding 那步自然會報錯）。
+      if (useVlm && typeof llm.unloadGenerateModel === 'function') {
+        try {
+          await llm.unloadGenerateModel();
+          send({ type: 'log', message: '已卸載生成模型騰出 VRAM（轉檔後自動重載）' });
+        } catch (e) {
+          send({ type: 'log', message: `卸載生成模型失敗（不影響轉檔）：${e.message}` });
+        }
+      }
       const result = await convertPdfToMarkdown(req.file.path, useVlm, msg => send({ type: 'log', message: msg }));
       mdPath = result.mdPath;
       tmpDir = result.tmpDir;
